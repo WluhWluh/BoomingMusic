@@ -15,6 +15,7 @@ import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxWaveformInferenceSession
 import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeBootstrap
 import java.util.concurrent.CancellationException
 import kotlin.math.max
@@ -520,7 +521,7 @@ private class MdxLiteRtAutoInferenceSession(
     private val gpuProbeNanos: Long?,
     private var cpuSetupNanos: Long?,
     private val nanoTime: () -> Long,
-) : MdxInferenceSession, MdxLiteRtAutoDiagnosticsProvider {
+) : MdxInferenceSession, MdxWaveformInferenceSession, MdxLiteRtAutoDiagnosticsProvider {
     private var activeSession: MdxInferenceSession? = initialSession
     private var state = initialState
     private var acceptedOutputBackend: MdxInferenceBackend? = null
@@ -558,6 +559,18 @@ private class MdxLiteRtAutoInferenceSession(
     override val autoDiagnostics: MdxLiteRtAutoDiagnostics
         get() = synchronized(this) { snapshotLocked() }
 
+    override val waveformSlotCount: Int
+        get() = synchronized(this) {
+            (activeSession as? MdxWaveformInferenceSession)?.waveformSlotCount ?: 0
+        }
+
+    override val waveformDspImplementationId: String
+        get() = synchronized(this) {
+            (activeSession as? MdxWaveformInferenceSession)?.waveformDspImplementationId
+                ?: "unavailable"
+        }
+    override val supportsStagedWaveformExecution: Boolean = false
+
     @Synchronized
     override fun run(
         inputNchw: FloatArray,
@@ -574,6 +587,168 @@ private class MdxLiteRtAutoInferenceSession(
             MdxLiteRtAutoSessionState.Closed -> error("LiteRT Auto session is closed.")
         }
     }
+
+    @Synchronized
+    override fun runWaveform(
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean,
+    ): Array<FloatArray> {
+        val session = checkNotNull(activeSession) { "LiteRT Auto session is not active." }
+        return when (state) {
+            MdxLiteRtAutoSessionState.GpuActive ->
+                runGpuWaveform(session, waveform, shouldCancel)
+
+            MdxLiteRtAutoSessionState.CpuDirect,
+            MdxLiteRtAutoSessionState.CpuFallback,
+            -> runCpuWaveform(session, waveform, shouldCancel)
+
+            MdxLiteRtAutoSessionState.Terminal -> error("LiteRT Auto session failed terminally.")
+            MdxLiteRtAutoSessionState.Closed -> error("LiteRT Auto session is closed.")
+        }
+    }
+
+    @Synchronized
+    override fun prepareWaveform(
+        waveform: Array<FloatArray>,
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ): Nothing = stagedWaveformUnsupported()
+
+    @Synchronized
+    override fun invokePreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ): Nothing = stagedWaveformUnsupported()
+
+    @Synchronized
+    override fun readPreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ): Nothing = stagedWaveformUnsupported()
+
+    @Synchronized
+    override fun discardPreparedWaveform(slot: Int): Nothing = stagedWaveformUnsupported()
+
+    private fun stagedWaveformUnsupported(): Nothing = throw UnsupportedOperationException(
+        "LiteRT Auto requires transactional runWaveform so GPU failure can replay on CPU.",
+    )
+
+    private fun runGpuWaveform(
+        gpuSession: MdxInferenceSession,
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean,
+    ): Array<FloatArray> {
+        val start = nanoTime()
+        try {
+            return requireWaveformSession(gpuSession).runWaveform(waveform, shouldCancel).also {
+                gpuInferenceNanos = nanoTime() - start
+                acceptedOutputBackend = MdxInferenceBackend.LiteRtGpu
+            }
+        } catch (error: CancellationException) {
+            gpuInferenceNanos = nanoTime() - start
+            throw error
+        } catch (error: OutOfMemoryError) {
+            gpuInferenceNanos = nanoTime() - start
+            terminateGpu(gpuSession, error)
+            throw error
+        } catch (error: MdxLiteRtBackendException) {
+            gpuInferenceNanos = nanoTime() - start
+            val stage = error.stage.toAutoFailureStage(isProbe = false)
+            if (!error.isRecoverable || error.hasCleanupFailure()) {
+                terminateGpu(gpuSession, error)
+                throw MdxLiteRtAutoInferenceException(stage, error)
+            }
+            return fallbackAndRunCpuWaveform(
+                gpuSession = gpuSession,
+                waveform = waveform,
+                shouldCancel = shouldCancel,
+                gpuFailure = error,
+                stage = stage,
+            )
+        }
+    }
+
+    private fun fallbackAndRunCpuWaveform(
+        gpuSession: MdxInferenceSession,
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean,
+        gpuFailure: MdxLiteRtBackendException,
+        stage: MdxLiteRtAutoFailureStage,
+    ): Array<FloatArray> {
+        try {
+            gpuSession.close()
+        } catch (cleanupFailure: Throwable) {
+            activeSession = null
+            state = MdxLiteRtAutoSessionState.Terminal
+            fallbackStage = MdxLiteRtAutoFailureStage.GpuCleanup
+            fallbackReason = gpuFailure.message
+            throw MdxLiteRtAutoInferenceException(
+                MdxLiteRtAutoFailureStage.GpuCleanup,
+                gpuFailure,
+                cleanupFailure,
+            )
+        }
+        activeSession = null
+        if (shouldCancel()) {
+            state = MdxLiteRtAutoSessionState.Terminal
+            throw CancellationException("LiteRT Auto fallback canceled before CPU setup.")
+        }
+        val setupStart = nanoTime()
+        val cpuSession = try {
+            cpuFactory.create(artifact, profile, runtimeSettings).also(::requireWaveformSession)
+        } catch (cpuFailure: Throwable) {
+            state = MdxLiteRtAutoSessionState.Terminal
+            fallbackStage = MdxLiteRtAutoFailureStage.CpuSetup
+            fallbackReason = gpuFailure.message
+            throw MdxLiteRtAutoInferenceException(
+                MdxLiteRtAutoFailureStage.CpuSetup,
+                gpuFailure,
+                cpuFailure,
+            )
+        }
+        cpuSetupNanos = nanoTime() - setupStart
+        activeSession = cpuSession
+        state = MdxLiteRtAutoSessionState.CpuFallback
+        fallbackStage = stage
+        fallbackReason = gpuFailure.message
+        this.gpuFailure = gpuFailure
+        return runCpuWaveform(cpuSession, waveform, shouldCancel)
+    }
+
+    private fun runCpuWaveform(
+        cpuSession: MdxInferenceSession,
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean,
+    ): Array<FloatArray> {
+        val start = nanoTime()
+        try {
+            return requireWaveformSession(cpuSession).runWaveform(waveform, shouldCancel).also {
+                cpuInferenceNanos = nanoTime() - start
+                acceptedOutputBackend = MdxInferenceBackend.LiteRtCpu
+            }
+        } catch (error: CancellationException) {
+            cpuInferenceNanos = nanoTime() - start
+            throw error
+        } catch (error: Throwable) {
+            cpuInferenceNanos = nanoTime() - start
+            if (state != MdxLiteRtAutoSessionState.CpuFallback) throw error
+            state = MdxLiteRtAutoSessionState.Terminal
+            fallbackStage = MdxLiteRtAutoFailureStage.CpuInvocation
+            runCatching { cpuSession.close() }.exceptionOrNull()?.let(error::addSuppressed)
+            activeSession = null
+            val primaryFailure = gpuFailure ?: error
+            throw MdxLiteRtAutoInferenceException(
+                MdxLiteRtAutoFailureStage.CpuInvocation,
+                primaryFailure,
+                error.takeUnless { it === primaryFailure },
+            )
+        }
+    }
+
+    private fun requireWaveformSession(
+        session: MdxInferenceSession = checkNotNull(activeSession),
+    ): MdxWaveformInferenceSession = session as? MdxWaveformInferenceSession
+        ?: throw IllegalStateException("The active LiteRT session has no waveform capability.")
 
     private fun runGpu(
         gpuSession: MdxInferenceSession,

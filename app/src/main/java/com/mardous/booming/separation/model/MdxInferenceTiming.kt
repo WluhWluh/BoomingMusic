@@ -20,10 +20,15 @@ internal class MdxTimedInferenceSessionFactory(
     ): MdxInferenceSession {
         val started = nanoTime()
         val session = delegate.create(artifact, profile, runtimeSettings)
-        return TimedSession(
+        val timedSession = TimedSession(
             delegate = session,
             modelSetupNanos = elapsedSince(started),
         )
+        return if (session is MdxWaveformInferenceSession) {
+            TimedWaveformSession(timedSession, session)
+        } else {
+            timedSession
+        }
     }
 
     private inner class TimedSession(
@@ -59,10 +64,14 @@ internal class MdxTimedInferenceSessionFactory(
         override fun run(
             inputNchw: FloatArray,
             shouldCancel: () -> Boolean,
-        ): FloatArray {
+        ): FloatArray = measureInvocation {
+            delegate.run(inputNchw, shouldCancel)
+        }
+
+        fun <T> measureInvocation(invocation: () -> T): T {
             val started = nanoTime()
             return try {
-                delegate.run(inputNchw, shouldCancel)
+                invocation()
             } finally {
                 val elapsed = elapsedSince(started)
                 synchronized(lock) {
@@ -80,6 +89,46 @@ internal class MdxTimedInferenceSessionFactory(
         }
 
         override fun close() = delegate.close()
+    }
+
+    private class TimedWaveformSession(
+        private val timedSession: TimedSession,
+        private val waveformDelegate: MdxWaveformInferenceSession,
+    ) : MdxInferenceSession by timedSession, MdxWaveformInferenceSession {
+        override val waveformSlotCount: Int
+            get() = waveformDelegate.waveformSlotCount
+        override val waveformDspImplementationId: String
+            get() = waveformDelegate.waveformDspImplementationId
+        override val supportsStagedWaveformExecution: Boolean
+            get() = waveformDelegate.supportsStagedWaveformExecution
+
+        override fun runWaveform(
+            waveform: Array<FloatArray>,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> = timedSession.measureInvocation {
+            waveformDelegate.runWaveform(waveform, shouldCancel)
+        }
+
+        override fun prepareWaveform(
+            waveform: Array<FloatArray>,
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) = waveformDelegate.prepareWaveform(waveform, slot, shouldCancel)
+
+        override fun invokePreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) = timedSession.measureInvocation {
+            waveformDelegate.invokePreparedWaveform(slot, shouldCancel)
+        }
+
+        override fun readPreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> = waveformDelegate.readPreparedWaveform(slot, shouldCancel)
+
+        override fun discardPreparedWaveform(slot: Int) =
+            waveformDelegate.discardPreparedWaveform(slot)
     }
 
     private fun elapsedSince(started: Long): Long = (nanoTime() - started).coerceAtLeast(0L)

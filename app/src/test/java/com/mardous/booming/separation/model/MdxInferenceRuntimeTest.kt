@@ -93,6 +93,28 @@ class MdxInferenceRuntimeTest {
     }
 
     @Test
+    fun `timed factory preserves waveform capability and records one invocation`() {
+        val timestamps = ArrayDeque(listOf(10L, 20L, 30L, 55L))
+        val delegate = FakeWaveformFactory()
+        val factory = delegate.withMdxInferenceTiming { timestamps.removeFirst() }
+        val profile = profile()
+        val session = factory.create(artifact(profile), profile, MdxRuntimeSettings())
+        val waveformSession = session as MdxWaveformInferenceSession
+        val input = Array(MdxDspConfig.STEREO_CHANNELS) {
+            FloatArray(profile.dspConfig.chunkSize) { 0.25f }
+        }
+
+        val output = waveformSession.runWaveform(input)
+
+        assertEquals(1, delegate.session.invocationCount)
+        assertEquals(10L, session.diagnostics.modelSetupNanos)
+        assertEquals(1L, session.diagnostics.inferenceInvocationCount)
+        assertEquals(25L, session.diagnostics.firstInferenceNanos)
+        assertEquals("fake-waveform", waveformSession.waveformDspImplementationId)
+        assertTrue(output.all { channel -> channel.all { it == 0.5f } })
+    }
+
+    @Test
     fun `non interruptible invocation discards an output canceled in flight`() {
         var canceled = false
         var invocationCount = 0
@@ -201,5 +223,61 @@ class MdxInferenceRuntimeTest {
         override fun close() {
             closeCount += 1
         }
+    }
+
+    private class FakeWaveformFactory : MdxInferenceSessionFactory {
+        override val factoryId = "fake-waveform"
+        override val backend = MdxInferenceBackend.LiteRtCpu
+        val session = FakeWaveformSession()
+
+        override fun create(
+            artifact: MdxModelArtifact,
+            profile: MdxExecutionProfile,
+            runtimeSettings: MdxRuntimeSettings,
+        ): MdxInferenceSession = session
+    }
+
+    private class FakeWaveformSession : MdxInferenceSession, MdxWaveformInferenceSession {
+        override val diagnostics = MdxRuntimeDiagnostics(
+            runtimeName = "Fake waveform",
+            backend = MdxInferenceBackend.LiteRtCpu,
+            cpuThreads = 1,
+            detail = "test",
+        )
+        override val waveformSlotCount = 1
+        override val waveformDspImplementationId = "fake-waveform"
+        private var prepared: Array<FloatArray>? = null
+        var invocationCount = 0
+
+        override fun run(
+            inputNchw: FloatArray,
+            shouldCancel: () -> Boolean,
+        ): FloatArray = inputNchw.copyOf()
+
+        override fun prepareWaveform(
+            waveform: Array<FloatArray>,
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) {
+            prepared = waveform
+        }
+
+        override fun invokePreparedWaveform(slot: Int, shouldCancel: () -> Boolean) {
+            checkNotNull(prepared)
+            invocationCount += 1
+        }
+
+        override fun readPreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> = checkNotNull(prepared).map { channel ->
+            FloatArray(channel.size) { index -> channel[index] * 2f }
+        }.toTypedArray().also { prepared = null }
+
+        override fun discardPreparedWaveform(slot: Int) {
+            prepared = null
+        }
+
+        override fun close() = Unit
     }
 }

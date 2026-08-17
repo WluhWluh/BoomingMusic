@@ -14,6 +14,7 @@ import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxWaveformInferenceSession
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
 import java.util.UUID
@@ -237,6 +238,73 @@ internal class SourceSeparationProcessSessionController(
         }
     }
 
+    @Synchronized
+    private fun runTrackedWaveform(
+        delegate: MdxInferenceSession,
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean,
+    ): Array<FloatArray> {
+        check(activeLeaseCount == 1 && residentSession != null) {
+            "Native waveform invocation has no active process lease."
+        }
+        val waveformDelegate = delegate as? MdxWaveformInferenceSession
+            ?: error("The native inference session has no waveform capability.")
+        invocationCount += 1L
+        return try {
+            waveformDelegate.runWaveform(waveform, shouldCancel).also { output ->
+                if (output.any { channel -> channel.any { !it.isFinite() } }) {
+                    throw IllegalStateException("Native waveform inference returned non-finite output.")
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            if (ownership == SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit ||
+                error.requiresFreshProcessGeneration()
+            ) {
+                poisonLocked("Native waveform inference failed: " +
+                    (error.message ?: error::class.java.name))
+            }
+            throw error
+        }
+    }
+
+    private fun <T> runTrackedWaveformStage(
+        delegate: MdxInferenceSession,
+        stage: String,
+        countInvocation: Boolean = false,
+        forcePoisonOnFailure: Boolean = false,
+        validateOutput: (T) -> Unit = {},
+        operation: (MdxWaveformInferenceSession) -> T,
+    ): T {
+        val waveformDelegate = synchronized(this) {
+            check(activeLeaseCount == 1 && residentSession != null) {
+                "Native waveform $stage has no active process lease."
+            }
+            if (countInvocation) invocationCount += 1L
+            delegate as? MdxWaveformInferenceSession
+                ?: error("The native inference session has no waveform capability.")
+        }
+        return try {
+            operation(waveformDelegate).also(validateOutput)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            synchronized(this) {
+                if (forcePoisonOnFailure ||
+                    ownership == SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit ||
+                    error.requiresFreshProcessGeneration()
+                ) {
+                    poisonLocked(
+                        "Native waveform $stage failed: " +
+                            (error.message ?: error::class.java.name),
+                    )
+                }
+            }
+            throw error
+        }
+    }
+
     private fun poisonLocked(reason: String) {
         poisonReason = poisonReason ?: reason
         state = SourceSeparationProcessSessionState.Poisoned
@@ -288,7 +356,7 @@ internal class SourceSeparationProcessSessionController(
 
     private inner class TrackingSession(
         private val delegate: MdxInferenceSession,
-    ) : MdxInferenceSession {
+    ) : MdxInferenceSession, MdxWaveformInferenceSession {
         override val diagnostics
             get() = delegate.diagnostics
 
@@ -297,7 +365,66 @@ internal class SourceSeparationProcessSessionController(
             shouldCancel: () -> Boolean,
         ): FloatArray = runTracked(delegate, inputNchw, shouldCancel)
 
+        override val waveformSlotCount: Int
+            get() = (delegate as? MdxWaveformInferenceSession)?.waveformSlotCount ?: 0
+        override val waveformDspImplementationId: String
+            get() = (delegate as? MdxWaveformInferenceSession)?.waveformDspImplementationId
+                ?: "unavailable"
+        override val supportsStagedWaveformExecution: Boolean
+            get() = (delegate as? MdxWaveformInferenceSession)
+                ?.supportsStagedWaveformExecution == true
+
+        override fun runWaveform(
+            waveform: Array<FloatArray>,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> = runTrackedWaveform(delegate, waveform, shouldCancel)
+
+        override fun prepareWaveform(
+            waveform: Array<FloatArray>,
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) = runTrackedWaveformStage(delegate, stage = "prepare") { waveformDelegate ->
+            waveformDelegate.prepareWaveform(waveform, slot, shouldCancel)
+        }
+
+        override fun invokePreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) = runTrackedWaveformStage(
+            delegate,
+            stage = "invocation",
+            countInvocation = true,
+        ) { waveformDelegate ->
+            waveformDelegate.invokePreparedWaveform(slot, shouldCancel)
+        }
+
+        override fun readPreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> = runTrackedWaveformStage(
+            delegate,
+            stage = "output read",
+            validateOutput = { output ->
+                if (output.any { channel -> channel.any { !it.isFinite() } }) {
+                    throw IllegalStateException(
+                        "Native staged waveform inference returned non-finite output.",
+                    )
+                }
+            },
+        ) { waveformDelegate ->
+            waveformDelegate.readPreparedWaveform(slot, shouldCancel)
+        }
+
+        override fun discardPreparedWaveform(slot: Int) = runTrackedWaveformStage(
+            delegate,
+            stage = "discard",
+            forcePoisonOnFailure = true,
+        ) { waveformDelegate ->
+            waveformDelegate.discardPreparedWaveform(slot)
+        }
+
         override fun close() = delegate.close()
+
     }
 
     private data class ActiveExecution(

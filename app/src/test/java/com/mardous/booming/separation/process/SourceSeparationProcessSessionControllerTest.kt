@@ -18,12 +18,16 @@ import com.mardous.booming.separation.model.MdxStem
 import com.mardous.booming.separation.model.MdxTensorDataType
 import com.mardous.booming.separation.model.MdxTensorLayout
 import com.mardous.booming.separation.model.MdxTensorSpec
+import com.mardous.booming.separation.model.MdxWaveformInferenceSession
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
 import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
 import java.nio.file.Files
 import java.util.concurrent.CancellationException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -221,6 +225,120 @@ class SourceSeparationProcessSessionControllerTest {
         }
         controller.finishExecution("run-2", null)
         assertEquals(1, factory.sessions.size)
+    }
+
+    @Test
+    fun `waveform invocation is forwarded and counted through the process lease`() {
+        val output = arrayOf(floatArrayOf(2f, 4f), floatArrayOf(6f, 8f))
+        val factory = FakeFactory(
+            waveformEnabled = true,
+            waveformOutput = output,
+        )
+        val controller = residentController(factory)
+        controller.beginExecution("run-waveform")
+        val lease = controller.acquire(artifact, profile, settings)
+        val waveformSession = lease.session as MdxWaveformInferenceSession
+        val input = arrayOf(floatArrayOf(1f, 2f), floatArrayOf(3f, 4f))
+
+        val observed = waveformSession.runWaveform(input)
+
+        assertSame(output, observed)
+        assertSame(input, factory.sessions.single().waveformInputs.single())
+        assertEquals(1, waveformSession.waveformSlotCount)
+        assertEquals("fake-managed-waveform", waveformSession.waveformDspImplementationId)
+        assertEquals(1L, controller.diagnostics().invocationCount)
+        assertEquals(SourceSeparationProcessSessionState.Resident, controller.diagnostics().state)
+        lease.close()
+        controller.finishExecution("run-waveform", null)
+    }
+
+    @Test
+    fun `staged waveform capability preserves accounting and finite validation`() {
+        val output = arrayOf(floatArrayOf(2f, 4f), floatArrayOf(6f, 8f))
+        val factory = FakeFactory(
+            waveformEnabled = true,
+            waveformStagedEnabled = true,
+            waveformOutput = output,
+        )
+        val controller = residentController(factory)
+        controller.beginExecution("run-staged-waveform")
+        val lease = controller.acquire(artifact, profile, settings)
+        val session = lease.session as MdxWaveformInferenceSession
+        val input = arrayOf(floatArrayOf(1f, 2f), floatArrayOf(3f, 4f))
+
+        assertTrue(session.supportsStagedWaveformExecution)
+        assertEquals(2, session.waveformSlotCount)
+        session.prepareWaveform(input, 0)
+        session.invokePreparedWaveform(0)
+        assertSame(output, session.readPreparedWaveform(0))
+        assertEquals(1L, controller.diagnostics().invocationCount)
+        assertEquals(SourceSeparationProcessSessionState.Resident, controller.diagnostics().state)
+
+        lease.close()
+        controller.finishExecution("run-staged-waveform", null)
+    }
+
+    @Test
+    fun `staged invocation does not hold the controller lock while another slot prepares`() {
+        val blockingSession = BlockingStagedSession()
+        val factory = object : MdxInferenceSessionFactory {
+            override val factoryId = "blocking-staged"
+            override val backend = MdxInferenceBackend.LiteRtAuto
+
+            override fun create(
+                artifact: MdxModelArtifact,
+                profile: MdxExecutionProfile,
+                runtimeSettings: MdxRuntimeSettings,
+            ): MdxInferenceSession = blockingSession
+        }
+        val controller = SourceSeparationProcessSessionController(
+            factory,
+            SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit,
+            runtimeAbi = MdxRuntimeAbi.X86,
+        )
+        controller.beginExecution("run-staged-overlap")
+        val lease = controller.acquire(artifact, profile, settings)
+        val session = lease.session as MdxWaveformInferenceSession
+        session.prepareWaveform(arrayOf(floatArrayOf(1f), floatArrayOf(1f)), 0)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val invocation = executor.submit { session.invokePreparedWaveform(0) }
+            assertTrue(blockingSession.invocationEntered.await(1, TimeUnit.SECONDS))
+            val prepare = executor.submit {
+                session.prepareWaveform(arrayOf(floatArrayOf(2f), floatArrayOf(2f)), 1)
+            }
+            prepare.get(1, TimeUnit.SECONDS)
+            blockingSession.releaseInvocation.countDown()
+            invocation.get(1, TimeUnit.SECONDS)
+        } finally {
+            blockingSession.releaseInvocation.countDown()
+            executor.shutdownNow()
+            executor.awaitTermination(1, TimeUnit.SECONDS)
+        }
+        assertEquals(1L, controller.diagnostics().invocationCount)
+        lease.close()
+        controller.finishExecution("run-staged-overlap", null)
+    }
+
+    @Test
+    fun `non-finite waveform output poisons the process generation`() {
+        val factory = FakeFactory(
+            waveformEnabled = true,
+            waveformOutput = arrayOf(floatArrayOf(Float.NaN), floatArrayOf(0f)),
+        )
+        val controller = residentController(factory)
+        controller.beginExecution("run-waveform-non-finite")
+        val lease = controller.acquire(artifact, profile, settings)
+        val waveformSession = lease.session as MdxWaveformInferenceSession
+
+        val failure = assertThrows(IllegalStateException::class.java) {
+            waveformSession.runWaveform(arrayOf(floatArrayOf(1f), floatArrayOf(1f)))
+        }
+        lease.close()
+        controller.finishExecution("run-waveform-non-finite", failure)
+
+        assertTrue(controller.diagnostics().poisoned)
+        assertEquals(1L, controller.diagnostics().invocationCount)
     }
 
     @Test
@@ -481,6 +599,10 @@ class SourceSeparationProcessSessionControllerTest {
         private val runFailure: Throwable? = null,
         private val output: FloatArray? = null,
         private val closeFailure: Throwable? = null,
+        private val waveformEnabled: Boolean = false,
+        private val waveformStagedEnabled: Boolean = false,
+        private val waveformOutput: Array<FloatArray>? = null,
+        private val waveformFailure: Throwable? = null,
     ) : MdxInferenceSessionFactory {
         override val factoryId = "fake-auto"
         override val backend = MdxInferenceBackend.LiteRtAuto
@@ -494,7 +616,15 @@ class SourceSeparationProcessSessionControllerTest {
         ): MdxInferenceSession {
             createCount += 1
             createFailure?.let { throw it }
-            return FakeSession(runFailure, output, closeFailure).also(sessions::add)
+            return FakeSession(
+                runFailure = runFailure,
+                output = output,
+                closeFailure = closeFailure,
+                waveformEnabled = waveformEnabled,
+                waveformStagedEnabled = waveformStagedEnabled,
+                waveformOutput = waveformOutput,
+                waveformFailure = waveformFailure,
+            ).also(sessions::add)
         }
     }
 
@@ -502,7 +632,11 @@ class SourceSeparationProcessSessionControllerTest {
         private val runFailure: Throwable?,
         private val output: FloatArray?,
         private val closeFailure: Throwable?,
-    ) : MdxInferenceSession {
+        private val waveformEnabled: Boolean,
+        private val waveformStagedEnabled: Boolean,
+        private val waveformOutput: Array<FloatArray>?,
+        private val waveformFailure: Throwable?,
+    ) : MdxInferenceSession, MdxWaveformInferenceSession {
         override val diagnostics = MdxRuntimeDiagnostics(
             runtimeName = "Fake",
             backend = MdxInferenceBackend.LiteRtCpu,
@@ -510,8 +644,17 @@ class SourceSeparationProcessSessionControllerTest {
             detail = "test",
         )
         var closeCount = 0
+        val waveformInputs = mutableListOf<Array<FloatArray>>()
+        private var preparedWaveform: Array<FloatArray>? = null
         val closed: Boolean
             get() = closeCount > 0
+
+        override val waveformSlotCount: Int
+            get() = if (waveformStagedEnabled) 2 else if (waveformEnabled) 1 else 0
+        override val waveformDspImplementationId: String
+            get() = if (waveformEnabled) "fake-managed-waveform" else "unavailable"
+        override val supportsStagedWaveformExecution: Boolean
+            get() = waveformStagedEnabled
 
         override fun run(
             inputNchw: FloatArray,
@@ -521,9 +664,89 @@ class SourceSeparationProcessSessionControllerTest {
             return output ?: inputNchw.copyOf()
         }
 
+        override fun runWaveform(
+            waveform: Array<FloatArray>,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> {
+            check(waveformEnabled)
+            waveformInputs += waveform
+            waveformFailure?.let { throw it }
+            return waveformOutput ?: waveform.map(FloatArray::copyOf).toTypedArray()
+        }
+
+        override fun prepareWaveform(
+            waveform: Array<FloatArray>,
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) {
+            check(waveformEnabled && slot == 0)
+            preparedWaveform = waveform
+        }
+
+        override fun invokePreparedWaveform(slot: Int, shouldCancel: () -> Boolean) {
+            check(waveformEnabled && slot == 0 && preparedWaveform != null)
+            waveformFailure?.let { throw it }
+        }
+
+        override fun readPreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> {
+            check(waveformEnabled && slot == 0)
+            return waveformOutput ?: checkNotNull(preparedWaveform)
+                .map(FloatArray::copyOf)
+                .toTypedArray()
+        }
+
+        override fun discardPreparedWaveform(slot: Int) {
+            check(slot == 0)
+            preparedWaveform = null
+        }
+
         override fun close() {
             closeCount += 1
             closeFailure?.let { throw it }
         }
+    }
+
+    private class BlockingStagedSession : MdxInferenceSession, MdxWaveformInferenceSession {
+        val invocationEntered = CountDownLatch(1)
+        val releaseInvocation = CountDownLatch(1)
+        override val diagnostics = MdxRuntimeDiagnostics(
+            runtimeName = "Blocking",
+            backend = MdxInferenceBackend.LiteRtCpu,
+            cpuThreads = 1,
+            detail = "test",
+        )
+        override val waveformSlotCount = 2
+        override val waveformDspImplementationId = "blocking-staged"
+        override val supportsStagedWaveformExecution = true
+
+        override fun run(
+            inputNchw: FloatArray,
+            shouldCancel: () -> Boolean,
+        ): FloatArray = inputNchw
+
+        override fun prepareWaveform(
+            waveform: Array<FloatArray>,
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) {
+            require(slot in 0..1)
+        }
+
+        override fun invokePreparedWaveform(slot: Int, shouldCancel: () -> Boolean) {
+            require(slot == 0)
+            invocationEntered.countDown()
+            check(releaseInvocation.await(2, TimeUnit.SECONDS))
+        }
+
+        override fun readPreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> = arrayOf(floatArrayOf(0f), floatArrayOf(0f))
+
+        override fun discardPreparedWaveform(slot: Int) = Unit
+        override fun close() = Unit
     }
 }

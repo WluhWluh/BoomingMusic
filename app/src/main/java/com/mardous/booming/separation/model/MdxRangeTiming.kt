@@ -119,6 +119,7 @@ data class MdxRangeTimingReport(
             "Window resample",
             "STFT",
             "Model inference",
+            "Managed waveform pipeline",
             "ISTFT",
             "Output compensation",
             "Stem subtract",

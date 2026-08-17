@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -143,11 +144,31 @@ class MdxPlan {
             action(0);
             return;
         }
+        std::exception_ptr firstError;
+        std::mutex errorMutex;
+        auto invoke = [&](int worker) noexcept {
+            try {
+                action(worker);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(errorMutex);
+                if (firstError == nullptr) firstError = std::current_exception();
+            }
+        };
         std::vector<std::thread> threads;
         threads.reserve(static_cast<size_t>(count - 1));
-        for (int lane = 1; lane < count; ++lane) threads.emplace_back(action, lane);
-        action(0);
-        for (auto& thread : threads) thread.join();
+        try {
+            for (int lane = 1; lane < count; ++lane) threads.emplace_back(invoke, lane);
+        } catch (...) {
+            for (auto& thread : threads) {
+                if (thread.joinable()) thread.join();
+            }
+            throw;
+        }
+        invoke(0);
+        for (auto& thread : threads) {
+            if (thread.joinable()) thread.join();
+        }
+        if (firstError != nullptr) std::rethrow_exception(firstError);
     }
 
     int nFft;

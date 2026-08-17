@@ -16,9 +16,14 @@ import com.mardous.booming.separation.model.MdxTensorDataType
 import com.mardous.booming.separation.model.MdxTensorLayout
 import com.mardous.booming.separation.model.MdxTensorLayoutConverter
 import com.mardous.booming.separation.model.MdxTensorSpec
+import com.mardous.booming.separation.model.MdxWaveformInferenceSession
 import com.mardous.booming.separation.model.runNonInterruptibleMdxInference
 import com.mardous.booming.separation.model.throwIfMdxInferenceCanceled
+import com.mardous.booming.separation.runtime.SourceSeparationCpuRuntimeInstallation
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import java.util.concurrent.CancellationException
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 internal enum class MdxLiteRtFailureStage {
     EnvironmentCreate,
@@ -49,14 +54,13 @@ internal object MdxLiteRtNativeSessionAllocator : MdxLiteRtSessionAllocator {
         cpuThreads: Int,
         xnnPackFlags: Int?,
         compatibility: MdxCompatibilityDecision,
-    ): MdxInferenceSession = createNativeLiteRtSession(
-        artifact = artifact,
-        profile = profile,
-        requiredAccelerator = Accelerator.CPU,
-        options = CompiledModel.Options(Accelerator.CPU).apply {
-            this.cpuOptions = CompiledModel.CpuOptions(cpuThreads, xnnPackFlags, null)
-        },
-        diagnostics = MdxRuntimeDiagnostics(
+    ): MdxInferenceSession {
+        val installation = runLiteRtOperation(MdxLiteRtFailureStage.EnvironmentCreate) {
+            LiteRt220RuntimeIdentity.requireExact(
+                SourceSeparationRuntimeBootstrap.requireLoadedInstallation(),
+            )
+        }
+        val diagnostics = MdxRuntimeDiagnostics(
             runtimeName = "LiteRT 2.2.0",
             backend = MdxInferenceBackend.LiteRtCpu,
             cpuThreads = cpuThreads,
@@ -64,8 +68,34 @@ internal object MdxLiteRtNativeSessionAllocator : MdxLiteRtSessionAllocator {
                 append(compatibilityDetail(compatibility))
                 xnnPackFlags?.let { append(", xnnpackFlags=").append(it) }
             },
-        ),
-    )
+        )
+        return if (!shouldUseJvmMdxCpuPipeline(installation.identity.abi, xnnPackFlags)) {
+            createManagedLiteRtSession(
+                installation = installation,
+                artifact = artifact,
+                profile = profile,
+                cpuThreads = cpuThreads,
+                diagnostics = diagnostics,
+                backend = MdxLiteRtManagedPipeline.Backend.Cpu,
+            )
+        } else {
+            createJvmLiteRtSession(
+                artifact = artifact,
+                profile = profile,
+                requiredAccelerator = Accelerator.CPU,
+                options = CompiledModel.Options(Accelerator.CPU).apply {
+                    this.cpuOptions = CompiledModel.CpuOptions(cpuThreads, xnnPackFlags, null)
+                },
+                diagnostics = diagnostics.copy(
+                    detail = diagnostics.detail + if (installation.identity.abi == "x86") {
+                        ", pipeline=jvm-tensor-buffer-x86-fallback"
+                    } else {
+                        ", pipeline=jvm-tensor-buffer-flags-fallback"
+                    },
+                ),
+            )
+        }
+    }
 }
 
 internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocator {
@@ -75,6 +105,11 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
         runtimeProfile: MdxLiteRtGpuRuntimeProfile,
         compatibility: MdxCompatibilityDecision,
     ): MdxInferenceSession {
+        val installation = runLiteRtOperation(MdxLiteRtFailureStage.EnvironmentCreate) {
+            LiteRt220RuntimeIdentity.requireExact(
+                SourceSeparationRuntimeBootstrap.requireLoadedInstallation(),
+            )
+        }
         val boundedRuntimeEnabled = runtimeProfile.profileId ==
             MdxLiteRtBoundedGpuContract.PROFILE_ID
         val boundedCapability = if (boundedRuntimeEnabled) {
@@ -90,43 +125,193 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
         } else {
             null
         }
-        return createNativeLiteRtSession(
-            artifact = artifact,
-            profile = profile,
-            requiredAccelerator = Accelerator.GPU,
-            options = CompiledModel.Options(Accelerator.GPU).apply {
-                gpuOptions = CompiledModel.GpuOptions(
-                    precision = runtimeProfile.precision.toLiteRtPrecision(),
-                    backend = runtimeProfile.api.toLiteRtBackend(),
-                    priority = runtimeProfile.priority?.toLiteRtPriority(),
-                    numStepsOfCommandBufferPreparations = if (boundedRuntimeEnabled) {
-                        MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE
-                    } else {
-                        null
-                    },
-                )
+        val diagnostics = MdxRuntimeDiagnostics(
+            runtimeName = "LiteRT 2.2.0",
+            backend = MdxInferenceBackend.LiteRtGpu,
+            cpuThreads = null,
+            detail = buildString {
+                append("layout=NHWC, profile=").append(runtimeProfile.profileId)
+                append(", api=").append(runtimeProfile.api.name)
+                append(", precision=").append(runtimeProfile.precision.name)
+                append(", priority=").append(runtimeProfile.priority?.name ?: "Default")
+                boundedCapability?.let {
+                    append(", boundedRuntime=").append(it.detail)
+                }
+                append(", ").append(compatibilityDetail(compatibility))
             },
-            diagnostics = MdxRuntimeDiagnostics(
-                runtimeName = "LiteRT 2.2.0",
-                backend = MdxInferenceBackend.LiteRtGpu,
-                cpuThreads = null,
-                detail = buildString {
-                    append("layout=NHWC, profile=").append(runtimeProfile.profileId)
-                    append(", api=").append(runtimeProfile.api.name)
-                    append(", precision=").append(runtimeProfile.precision.name)
-                    append(", priority=").append(runtimeProfile.priority?.name ?: "Default")
-                    boundedCapability?.let {
-                        append(", boundedRuntime=").append(it.detail)
-                    }
-                    append(", ").append(compatibilityDetail(compatibility))
-                },
-            ),
-            boundedRuntimeEnabled = boundedRuntimeEnabled,
         )
+        return if (boundedRuntimeEnabled) {
+            createManagedLiteRtSession(
+                installation = installation,
+                artifact = artifact,
+                profile = profile,
+                cpuThreads = 1,
+                diagnostics = diagnostics,
+                boundedRuntimeEnabled = true,
+                backend = MdxLiteRtManagedPipeline.Backend.BoundedGpu,
+            )
+        } else {
+            createJvmLiteRtSession(
+                artifact = artifact,
+                profile = profile,
+                requiredAccelerator = Accelerator.GPU,
+                options = CompiledModel.Options(Accelerator.GPU).apply {
+                    gpuOptions = CompiledModel.GpuOptions(
+                        precision = runtimeProfile.precision.toLiteRtPrecision(),
+                        backend = runtimeProfile.api.toLiteRtBackend(),
+                        priority = runtimeProfile.priority?.toLiteRtPriority(),
+                    )
+                },
+                diagnostics = diagnostics.copy(
+                    detail = diagnostics.detail + ", pipeline=jvm-tensor-buffer-fallback",
+                ),
+            )
+        }
     }
 }
 
-private fun createNativeLiteRtSession(
+private fun createManagedLiteRtSession(
+    installation: SourceSeparationCpuRuntimeInstallation,
+    artifact: MdxModelArtifact,
+    profile: MdxExecutionProfile,
+    cpuThreads: Int,
+    diagnostics: MdxRuntimeDiagnostics,
+    backend: MdxLiteRtManagedPipeline.Backend,
+    boundedRuntimeEnabled: Boolean = false,
+): MdxInferenceSession {
+    val pipeline = MdxLiteRtManagedPipeline(
+        coreLibraryFile = installation.libraryFile,
+        modelFile = artifact.file,
+        profile = profile,
+        cpuThreads = cpuThreads,
+        backend = backend,
+        slotCount = 2,
+    )
+    return MdxLiteRtManagedInferenceSession(
+        pipeline = pipeline,
+        profile = profile,
+        baseDiagnostics = diagnostics.copy(
+            detail = diagnostics.detail + ", pipeline=native-managed-dual-slot",
+        ),
+        boundedRuntimeEnabled = boundedRuntimeEnabled,
+    )
+}
+
+private class MdxLiteRtManagedInferenceSession(
+    private val pipeline: MdxLiteRtManagedPipeline,
+    private val profile: MdxExecutionProfile,
+    private val baseDiagnostics: MdxRuntimeDiagnostics,
+    private val boundedRuntimeEnabled: Boolean,
+) : MdxInferenceSession, MdxWaveformInferenceSession {
+    private val oneShotSequenceLock = ReentrantLock()
+
+    override val waveformSlotCount: Int = pipeline.slotCount
+    override val waveformDspImplementationId: String = "native-managed-pocketfft-packed-real-v1"
+    override val supportsStagedWaveformExecution: Boolean = true
+
+    override val diagnostics: MdxRuntimeDiagnostics
+        get() {
+            if (!boundedRuntimeEnabled) return baseDiagnostics
+            val statistics = runCatching {
+                MdxLiteRtBoundedGpuRuntime.statistics()
+            }.getOrNull() ?: return baseDiagnostics
+            return baseDiagnostics.copy(
+                detail = baseDiagnostics.detail +
+                    ", boundedDispatches=${statistics.dispatchCount}" +
+                    ", boundedEventWaits=${statistics.eventWaitCount}",
+            )
+        }
+
+    init {
+        if (boundedRuntimeEnabled) MdxLiteRtBoundedGpuRuntime.resetInferenceCounters()
+    }
+
+    override fun run(
+        inputNchw: FloatArray,
+        shouldCancel: () -> Boolean,
+    ): FloatArray = oneShotSequenceLock.withLock {
+        require(inputNchw.size == profile.inputTensor.elementCount) {
+            "Expected ${profile.inputTensor.elementCount} input elements, got ${inputNchw.size}."
+        }
+        throwIfMdxInferenceCanceled(shouldCancel)
+        pipeline.writeTensorNchw(inputNchw)
+        try {
+            invokePipeline(slot = 0, shouldCancel = shouldCancel)
+            pipeline.readTensorNchw().also(::requireFiniteMdxTensor)
+        } catch (error: Throwable) {
+            runCatching { pipeline.discard(0) }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
+        }.also {
+            throwIfMdxInferenceCanceled(shouldCancel)
+        }
+    }
+
+    override fun runWaveform(
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean,
+    ): Array<FloatArray> = oneShotSequenceLock.withLock {
+        val slot = 0
+        try {
+            prepareWaveform(waveform, slot, shouldCancel)
+            invokePreparedWaveform(slot, shouldCancel)
+            readPreparedWaveform(slot, shouldCancel)
+        } catch (error: Throwable) {
+            runCatching { discardPreparedWaveform(slot) }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
+        }
+    }
+
+    override fun prepareWaveform(
+        waveform: Array<FloatArray>,
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ) {
+        throwIfMdxInferenceCanceled(shouldCancel)
+        pipeline.preprocessWaveform(waveform, slot)
+        throwIfMdxInferenceCanceled(shouldCancel)
+    }
+
+    override fun invokePreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ) {
+        invokePipeline(slot, shouldCancel)
+    }
+
+    override fun readPreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ): Array<FloatArray> {
+        throwIfMdxInferenceCanceled(shouldCancel)
+        return pipeline.postprocessWaveform(slot).also { waveform ->
+            waveform.forEach(::requireFiniteMdxTensor)
+            throwIfMdxInferenceCanceled(shouldCancel)
+        }
+    }
+
+    override fun discardPreparedWaveform(slot: Int) {
+        pipeline.discard(slot)
+    }
+
+    override fun close() = oneShotSequenceLock.withLock(pipeline::close)
+
+    private fun invokePipeline(slot: Int, shouldCancel: () -> Boolean) {
+        runNonInterruptibleMdxInference(shouldCancel) {
+            if (boundedRuntimeEnabled) MdxLiteRtBoundedGpuRuntime.beginInference()
+            try {
+                pipeline.run(slot)
+            } finally {
+                if (boundedRuntimeEnabled) MdxLiteRtBoundedGpuRuntime.endInference()
+            }
+        }
+    }
+}
+
+private fun createJvmLiteRtSession(
     artifact: MdxModelArtifact,
     profile: MdxExecutionProfile,
     requiredAccelerator: Accelerator,

@@ -8,9 +8,10 @@ import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationStemLabelResolver
-import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
+import com.mardous.booming.separation.cache.SourceSeparationSegment
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
+import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultRuntimeDiagnostics
@@ -167,7 +168,10 @@ class MdxRangeSeparator(
         }
         var runtimeDiagnostics: MdxRuntimeDiagnostics? = null
 
-        val spectrogram = MdxWindowDspFactory.create(config)
+        val spectrogram = lazy(LazyThreadSafetyMode.NONE) {
+            MdxWindowDspFactory.create(config)
+        }
+        var dspImplementationId = "unavailable"
         try {
             requireWorkspaceAvailable()
             WavFileWriter(
@@ -195,6 +199,10 @@ class MdxRangeSeparator(
                 }
                 sessionLease.use { lease ->
                     val session = lease.session
+                    dspImplementationId = (session as? MdxWaveformInferenceSession)
+                        ?.takeIf { it.waveformSlotCount > 0 }
+                        ?.waveformDspImplementationId
+                        ?: spectrogram.value.implementationId
                     session.diagnostics.also { diagnostics ->
                         runtimeDiagnostics = diagnostics
                         onRuntimeDiagnostics(diagnostics)
@@ -203,10 +211,16 @@ class MdxRangeSeparator(
                         .count { it.state == SourceSeparationSegmentState.Ready }
                     val processedSegments = mutableSetOf<Int>()
                     var schedulerTargetSegmentIndex: Int? = null
-                    while (processedWindowCount < windowCount) {
-                        val windowStartedAt = SystemClock.elapsedRealtime()
-                        throwIfPaused(shouldPause)
-                        throwIfCanceled(shouldCancel)
+                    val stagedWaveformSession = (session as? MdxWaveformInferenceSession)
+                        ?.takeIf { it.canUseRangeLookahead(sourceInput.usesMp3WindowDecode) }
+                    val stagedExecutor = stagedWaveformSession
+                        ?.let(::MdxStagedWaveformExecutor)
+                    var prefetchedWindow: MdxPreparedWaveformWindow? = null
+                    var claimedPreparedSlot: Int? = null
+
+                    fun selectSegment(
+                        excludedSegmentIndexes: Set<Int> = emptySet(),
+                    ): MdxSelectedSegment? {
                         var requestedPlaybackSegmentIndex: Int? = null
                         var selectedPriority: SourceSeparationSegmentPriority? = null
                         val readyWindowCount = playbackReadyWindowCountProvider()
@@ -225,7 +239,11 @@ class MdxRangeSeparator(
                             }
                             requestedPlaybackSegmentIndex = schedulerTargetSegmentIndex
                             val playbackFrame = schedulerTargetSegmentIndex
-                                ?.let { index -> currentSegmentPlan.segments.getOrNull(index)?.playbackStartFrame }
+                                ?.let { index ->
+                                    currentSegmentPlan.segments
+                                        .getOrNull(index)
+                                        ?.playbackStartFrame
+                                }
                                 ?: (startFrame + processedWindowCount * config.generationSize)
                             SourceSeparationSegmentScheduler
                                 .prioritize(
@@ -233,43 +251,75 @@ class MdxRangeSeparator(
                                     playbackFrame = playbackFrame,
                                     readyWindowCount = readyWindowCount,
                                 )
-                                .firstOrNull { it.segment.index !in processedSegments }
+                                .firstOrNull {
+                                    it.segment.index !in processedSegments &&
+                                        it.segment.index !in excludedSegmentIndexes
+                                }
                                 ?.also { selectedPriority = it.priority }
                                 ?.segment
                         } else {
                             null
                         } ?: currentSegmentPlan.segments.firstOrNull {
                             it.index !in processedSegments &&
-                                    it.state != SourceSeparationSegmentState.Ready
+                                it.index !in excludedSegmentIndexes &&
+                                it.state != SourceSeparationSegmentState.Ready
+                        } ?: return null
+                        return MdxSelectedSegment(
+                            segment = segment,
+                            requestedPlaybackSegmentIndex = requestedPlaybackSegmentIndex,
+                            priority = selectedPriority
+                                ?: SourceSeparationSegmentPriority.IdleBackfill,
+                            readyWindowCount = readyWindowCount,
+                            readySegmentCount = readySegmentCount,
+                        )
+                    }
+
+                    var processingFailure: Throwable? = null
+                    try {
+                    while (processedWindowCount < windowCount) {
+                        val windowStartedAt = SystemClock.elapsedRealtime()
+                        throwIfPaused(shouldPause)
+                        throwIfCanceled(shouldCancel)
+                        val selectedSegment = selectSegment() ?: break
+                        val segment = selectedSegment.segment
+                        var preparedWindow = prefetchedWindow
+                        prefetchedWindow = null
+                        val currentSlot = preparedWindow?.slot ?: 0
+                        if (preparedWindow?.segmentIndex != null &&
+                            preparedWindow.segmentIndex != segment.index
+                        ) {
+                            claimedPreparedSlot = preparedWindow.slot
+                            stagedWaveformSession?.discardPreparedWaveform(preparedWindow.slot)
+                            claimedPreparedSlot = null
+                            preparedWindow = null
                         }
-                            ?: break
-                        selectedPriority = selectedPriority ?: SourceSeparationSegmentPriority.IdleBackfill
+                        if (preparedWindow != null) claimedPreparedSlot = currentSlot
                         val windowIndex = segment.index
                         val generationStartFrame = segment.playbackStartFrame
                         val remainingFrames = endFrame - generationStartFrame
                         val writeFrames = minOf(config.generationSize, remainingFrames)
                         val schedulerProgress = MdxSegmentSchedulerProgress(
-                            playbackSegmentIndex = requestedPlaybackSegmentIndex,
-                            playbackSegmentState = requestedPlaybackSegmentIndex
+                            playbackSegmentIndex = selectedSegment.requestedPlaybackSegmentIndex,
+                            playbackSegmentState = selectedSegment.requestedPlaybackSegmentIndex
                                 ?.let { currentSegmentPlan.segments.getOrNull(it)?.state?.name },
-                            nextSegmentIndex = requestedPlaybackSegmentIndex?.plus(1)
+                            nextSegmentIndex = selectedSegment.requestedPlaybackSegmentIndex?.plus(1)
                                 ?.takeIf { it < windowCount },
-                            nextSegmentState = requestedPlaybackSegmentIndex?.plus(1)
+                            nextSegmentState = selectedSegment.requestedPlaybackSegmentIndex?.plus(1)
                                 ?.let { currentSegmentPlan.segments.getOrNull(it)?.state?.name },
                             processingSegmentIndex = segment.index,
-                            priority = selectedPriority.name,
-                            readySegments = readySegmentCount,
+                            priority = selectedSegment.priority.name,
+                            readySegments = selectedSegment.readySegmentCount,
                             totalSegments = windowCount,
-                            readyWindowCount = readyWindowCount,
+                            readyWindowCount = selectedSegment.readyWindowCount,
                             playbackReadyWindowReadyCount = currentSegmentPlan
                                 .playbackReadyWindowReadyCount(
-                                    playbackSegmentIndex = requestedPlaybackSegmentIndex,
-                                    readyWindowCount = readyWindowCount,
+                                    playbackSegmentIndex = selectedSegment.requestedPlaybackSegmentIndex,
+                                    readyWindowCount = selectedSegment.readyWindowCount,
                                 ),
                             playbackReadyWindowPendingCount = currentSegmentPlan
                                 .playbackReadyWindowPendingCount(
-                                    playbackSegmentIndex = requestedPlaybackSegmentIndex,
-                                    readyWindowCount = readyWindowCount,
+                                    playbackSegmentIndex = selectedSegment.requestedPlaybackSegmentIndex,
+                                    readyWindowCount = selectedSegment.readyWindowCount,
                                     processingSegmentIndex = segment.index,
                                 ),
                         )
@@ -301,13 +351,18 @@ class MdxRangeSeparator(
                         throwIfPaused(shouldPause)
                         throwIfCanceled(shouldCancel)
                         requireWorkspaceAvailable()
-                        val mixWindow = sourceInput.toStereoFloatContextWindow(
-                            windowStartFrame = generationStartFrame - config.trim,
-                            frames = config.chunkSize,
-                            timing = timing,
-                            shouldCancel = shouldCancel,
-                        )
-                        val overlapResult = mp3WindowOverlapGuard?.observe(segment.index, mixWindow)
+                        val mixWindow = preparedWindow?.mixWindow
+                            ?: sourceInput.toStereoFloatContextWindow(
+                                windowStartFrame = generationStartFrame - config.trim,
+                                frames = config.chunkSize,
+                                timing = timing,
+                                shouldCancel = shouldCancel,
+                            )
+                        val overlapResult = if (preparedWindow == null) {
+                            mp3WindowOverlapGuard?.observe(segment.index, mixWindow)
+                        } else {
+                            null
+                        }
                         if (overlapResult is Mp3LazyWindowOverlapResult.Failed) {
                             Mp3WindowDecodeSessionGate.disable(overlapResult.reason)
                             val resetState = if (segmentOutputDir != null) {
@@ -362,14 +417,97 @@ class MdxRangeSeparator(
                         throwIfPaused(shouldPause)
                         throwIfCanceled(shouldCancel)
                         requireWorkspaceAvailable()
-                        val modelOutputWindow = runWindow(
-                            session = session,
-                            spectrogram = spectrogram,
-                            mixWindow = mixWindow,
-                            timing = timing,
-                            shouldCancel = shouldCancel,
-                            requireWorkspaceAvailable = requireWorkspaceAvailable,
-                        )
+                        val modelOutputWindow = if (
+                            stagedWaveformSession != null &&
+                            stagedExecutor != null
+                        ) {
+                            dspImplementationId = stagedWaveformSession.waveformDspImplementationId
+                            var newlyPreparedWindow: MdxPreparedWaveformWindow? = null
+                            try {
+                                val stagedResult = measureElapsed(
+                                    timing,
+                                    "Managed waveform pipeline",
+                                ) {
+                                    if (preparedWindow == null) {
+                                        stagedWaveformSession.prepareWaveform(
+                                            mixWindow,
+                                            currentSlot,
+                                            shouldCancel,
+                                        )
+                                        claimedPreparedSlot = currentSlot
+                                    }
+                                    reachNativeInvocation(session)
+                                    requireWorkspaceAvailable()
+                                    val lookaheadSlot = if (currentSlot == 0) 1 else 0
+                                    stagedExecutor.invokeAndPrepareLookahead(
+                                        slot = currentSlot,
+                                        shouldCancel = shouldCancel,
+                                        prepareLookahead = prepare@{
+                                            throwIfCanceled(shouldCancel)
+                                            val nextSegment = selectSegment(
+                                                excludedSegmentIndexes = setOf(segment.index),
+                                            )?.segment ?: return@prepare null
+                                            requireWorkspaceAvailable()
+                                            val nextMixWindow = sourceInput
+                                                .toStereoFloatContextWindow(
+                                                    windowStartFrame = nextSegment.playbackStartFrame -
+                                                        config.trim,
+                                                    frames = config.chunkSize,
+                                                    timing = timing,
+                                                    shouldCancel = shouldCancel,
+                                                )
+                                            throwIfCanceled(shouldCancel)
+                                            try {
+                                                stagedWaveformSession.prepareWaveform(
+                                                    nextMixWindow,
+                                                    lookaheadSlot,
+                                                    shouldCancel,
+                                                )
+                                            } catch (error: Throwable) {
+                                                runCatching {
+                                                    stagedWaveformSession
+                                                        .discardPreparedWaveform(lookaheadSlot)
+                                                }.exceptionOrNull()?.let(error::addSuppressed)
+                                                throw error
+                                            }
+                                            MdxPreparedWaveformWindow(
+                                                segmentIndex = nextSegment.index,
+                                                slot = lookaheadSlot,
+                                                mixWindow = nextMixWindow,
+                                            ).also { newlyPreparedWindow = it }
+                                        },
+                                    )
+                                }
+                                prefetchedWindow = stagedResult.lookahead
+                                newlyPreparedWindow = null
+                                claimedPreparedSlot = null
+                                stagedResult.output
+                            } catch (error: Throwable) {
+                                newlyPreparedWindow?.let { prepared ->
+                                    runCatching {
+                                        stagedWaveformSession
+                                            .discardPreparedWaveform(prepared.slot)
+                                    }.exceptionOrNull()?.let(error::addSuppressed)
+                                }
+                                runCatching {
+                                    stagedWaveformSession.discardPreparedWaveform(currentSlot)
+                                }.exceptionOrNull()?.let(error::addSuppressed)
+                                claimedPreparedSlot = null
+                                throw error
+                            }
+                        } else {
+                            runWindow(
+                                session = session,
+                                spectrogram = spectrogram,
+                                mixWindow = mixWindow,
+                                timing = timing,
+                                shouldCancel = shouldCancel,
+                                requireWorkspaceAvailable = requireWorkspaceAvailable,
+                                onDspImplementation = { implementationId ->
+                                    dspImplementationId = implementationId
+                                },
+                            )
+                        }
                         // Auto may switch from GPU to CPU during invocation; capture the
                         // post-run diagnostics so the completed cache records the real path.
                         session.diagnostics.also { diagnostics ->
@@ -470,20 +608,25 @@ class MdxRangeSeparator(
                                 sourceDecodeDiagnostics = sourceInput.diagnostics,
                                 completedWindowElapsedMs = windowElapsedMs,
                                 scheduler = schedulerProgress.copy(
-                                    playbackSegmentState = requestedPlaybackSegmentIndex
+                                    playbackSegmentState = selectedSegment
+                                        .requestedPlaybackSegmentIndex
                                         ?.let { currentSegmentPlan.segments.getOrNull(it)?.state?.name },
-                                    nextSegmentState = requestedPlaybackSegmentIndex?.plus(1)
+                                    nextSegmentState = selectedSegment
+                                        .requestedPlaybackSegmentIndex
+                                        ?.plus(1)
                                         ?.let { currentSegmentPlan.segments.getOrNull(it)?.state?.name },
                                     readySegments = processedWindowCount,
                                     playbackReadyWindowReadyCount = currentSegmentPlan
                                         .playbackReadyWindowReadyCount(
-                                            playbackSegmentIndex = requestedPlaybackSegmentIndex,
-                                            readyWindowCount = readyWindowCount,
+                                            playbackSegmentIndex = selectedSegment
+                                                .requestedPlaybackSegmentIndex,
+                                            readyWindowCount = selectedSegment.readyWindowCount,
                                         ),
                                     playbackReadyWindowPendingCount = currentSegmentPlan
                                         .playbackReadyWindowPendingCount(
-                                            playbackSegmentIndex = requestedPlaybackSegmentIndex,
-                                            readyWindowCount = readyWindowCount,
+                                            playbackSegmentIndex = selectedSegment
+                                                .requestedPlaybackSegmentIndex,
+                                            readyWindowCount = selectedSegment.readyWindowCount,
                                             processingSegmentIndex = null,
                                         ),
                                 ),
@@ -492,11 +635,39 @@ class MdxRangeSeparator(
                         )
                         throwIfCanceled(shouldCancel)
                     }
+                    } catch (error: Throwable) {
+                        processingFailure = error
+                        throw error
+                    } finally {
+                        var cleanupFailure: Throwable? = null
+                        fun recordCleanupFailure(error: Throwable) {
+                            cleanupFailure?.addSuppressed(error) ?: run {
+                                cleanupFailure = error
+                            }
+                        }
+                        claimedPreparedSlot?.let { slot ->
+                            runCatching {
+                                stagedWaveformSession?.discardPreparedWaveform(slot)
+                            }.exceptionOrNull()?.let(::recordCleanupFailure)
+                        }
+                        prefetchedWindow?.let { prepared ->
+                            runCatching {
+                                stagedWaveformSession
+                                    ?.discardPreparedWaveform(prepared.slot)
+                            }.exceptionOrNull()?.let(::recordCleanupFailure)
+                        }
+                        runCatching { stagedExecutor?.close() }
+                            .exceptionOrNull()
+                            ?.let(::recordCleanupFailure)
+                        cleanupFailure?.let { cleanup ->
+                            processingFailure?.addSuppressed(cleanup) ?: throw cleanup
+                        }
+                    }
                 }
             }
             }
         } finally {
-            spectrogram.close()
+            if (spectrogram.isInitialized()) spectrogram.value.close()
         }
 
         onProgress(
@@ -535,7 +706,7 @@ class MdxRangeSeparator(
             },
             executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceInput.diagnostics,
-            dspImplementationId = spectrogram.implementationId,
+            dspImplementationId = dspImplementationId,
         )
         requireWorkspaceAvailable()
         timingFile.writeText(
@@ -595,34 +766,52 @@ class MdxRangeSeparator(
 
     private fun runWindow(
         session: MdxInferenceSession,
-        spectrogram: MdxWindowDsp,
+        spectrogram: Lazy<MdxWindowDsp>,
         mixWindow: Array<FloatArray>,
         timing: MdxRangeTimingAccumulator,
         shouldCancel: () -> Boolean,
         requireWorkspaceAvailable: () -> Unit,
+        onDspImplementation: (String) -> Unit,
     ): Array<FloatArray> {
+        val waveformSession = (session as? MdxWaveformInferenceSession)
+            ?.takeIf { it.waveformSlotCount > 0 }
+        if (waveformSession != null) {
+            onDspImplementation(waveformSession.waveformDspImplementationId)
+            return measureElapsed(timing, "Managed waveform pipeline") {
+                reachNativeInvocation(session)
+                requireWorkspaceAvailable()
+                waveformSession.runWaveform(mixWindow, shouldCancel)
+            }
+        }
+
+        val activeSpectrogram = spectrogram.value
+        onDspImplementation(activeSpectrogram.implementationId)
         val modelInput = measureElapsed(timing, "STFT") {
-            spectrogram.waveformToNchwTensor(mixWindow)
+            activeSpectrogram.waveformToNchwTensor(mixWindow)
         }
         val modelOutput = measureElapsed(timing, "Model inference") {
-            val runtimeDiagnostics = if (BuildConfig.DEBUG) session.diagnostics else null
-            SourceSeparationCacheFaultInjection.reach(
-                SourceSeparationCacheFaultStage.NativeInvocation,
-                runtime = runtimeDiagnostics?.let { diagnostics ->
-                    SourceSeparationCacheFaultRuntimeDiagnostics(
-                        runtimeName = diagnostics.runtimeName,
-                        backend = diagnostics.backend.name,
-                        fallbackStage = diagnostics.fallbackStage,
-                        fallbackReason = diagnostics.fallbackReason,
-                    )
-                },
-            )
+            reachNativeInvocation(session)
             requireWorkspaceAvailable()
             session.run(modelInput, shouldCancel)
         }
         return measureElapsed(timing, "ISTFT") {
-            spectrogram.nchwTensorToWaveform(modelOutput)
+            activeSpectrogram.nchwTensorToWaveform(modelOutput)
         }
+    }
+
+    private fun reachNativeInvocation(session: MdxInferenceSession) {
+        val runtimeDiagnostics = if (BuildConfig.DEBUG) session.diagnostics else null
+        SourceSeparationCacheFaultInjection.reach(
+            SourceSeparationCacheFaultStage.NativeInvocation,
+            runtime = runtimeDiagnostics?.let { diagnostics ->
+                SourceSeparationCacheFaultRuntimeDiagnostics(
+                    runtimeName = diagnostics.runtimeName,
+                    backend = diagnostics.backend.name,
+                    fallbackStage = diagnostics.fallbackStage,
+                    fallbackReason = diagnostics.fallbackReason,
+                )
+            },
+        )
     }
 
     private fun stereoFloatToPcm16(waveform: Array<FloatArray>, startFrame: Int, frames: Int): ByteArray {
@@ -697,7 +886,7 @@ class MdxRangeSeparator(
     private fun SourceSeparationSegmentPlan.playbackReadyWindowStates(
         playbackSegmentIndex: Int?,
         readyWindowCount: Int,
-    ): List<com.mardous.booming.separation.cache.SourceSeparationSegment> {
+    ): List<SourceSeparationSegment> {
         if (playbackSegmentIndex == null || segments.isEmpty()) return emptyList()
         val startIndex = playbackSegmentIndex.coerceIn(segments.indices)
         val endIndex = (startIndex + readyWindowCount.coerceAtLeast(1))
@@ -705,6 +894,20 @@ class MdxRangeSeparator(
         return segments.subList(startIndex, endIndex)
     }
 }
+
+private data class MdxSelectedSegment(
+    val segment: SourceSeparationSegment,
+    val requestedPlaybackSegmentIndex: Int?,
+    val priority: SourceSeparationSegmentPriority,
+    val readyWindowCount: Int,
+    val readySegmentCount: Int,
+)
+
+private data class MdxPreparedWaveformWindow(
+    val segmentIndex: Int,
+    val slot: Int,
+    val mixWindow: Array<FloatArray>,
+)
 
 private class Mp3LazyWindowOverlapGuard(
     private val config: MdxDspConfig,

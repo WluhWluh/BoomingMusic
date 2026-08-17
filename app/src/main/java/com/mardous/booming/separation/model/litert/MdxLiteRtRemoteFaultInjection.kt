@@ -13,6 +13,7 @@ import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxWaveformInferenceSession
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -218,12 +219,21 @@ internal object MdxLiteRtRemoteFaultInjection {
     private const val MAXIMUM_CONTROL_LIFETIME_MS = 15L * 60L * 1_000L
 }
 
+internal interface MdxLiteRtRemoteFaultSessionTracker {
+    fun created(backend: MdxInferenceBackend)
+    fun closed(backend: MdxInferenceBackend)
+    fun invoked(backend: MdxInferenceBackend): Int
+    fun injected(stage: String)
+    fun shouldInjectAt(invocationCount: Int): Boolean
+    fun selectedFailpoint(): MdxLiteRtRemoteFailpoint
+}
+
 private class MdxLiteRtRemoteFaultController(
     context: Context,
     private val directory: File,
     private val control: MdxLiteRtRemoteFaultControl,
     private val json: Json,
-) {
+) : MdxLiteRtRemoteFaultSessionTracker {
     private val failpoint = MdxLiteRtRemoteFailpoint.parse(control.failpoint)
     private val processName = AppProcessResolver.resolve(context).processName
     private val pid = Process.myPid()
@@ -280,7 +290,7 @@ private class MdxLiteRtRemoteFaultController(
     }
 
     @Synchronized
-    fun created(backend: MdxInferenceBackend) {
+    override fun created(backend: MdxInferenceBackend) {
         when (backend) {
             MdxInferenceBackend.LiteRtGpu -> gpuCreateCount += 1
             MdxInferenceBackend.LiteRtCpu -> cpuCreateCount += 1
@@ -290,7 +300,7 @@ private class MdxLiteRtRemoteFaultController(
     }
 
     @Synchronized
-    fun closed(backend: MdxInferenceBackend) {
+    override fun closed(backend: MdxInferenceBackend) {
         when (backend) {
             MdxInferenceBackend.LiteRtGpu -> gpuCloseCount += 1
             MdxInferenceBackend.LiteRtCpu -> cpuCloseCount += 1
@@ -300,7 +310,7 @@ private class MdxLiteRtRemoteFaultController(
     }
 
     @Synchronized
-    fun invoked(backend: MdxInferenceBackend): Int {
+    override fun invoked(backend: MdxInferenceBackend): Int {
         val count = if (backend == MdxInferenceBackend.LiteRtGpu) {
             ++gpuInvocationCount
         } else {
@@ -311,17 +321,17 @@ private class MdxLiteRtRemoteFaultController(
     }
 
     @Synchronized
-    fun injected(stage: String) {
+    override fun injected(stage: String) {
         if (injectedAtElapsedRealtimeMs == null) {
             injectedAtElapsedRealtimeMs = SystemClock.elapsedRealtime()
         }
         eventLocked("inject-$stage")
     }
 
-    fun shouldInjectAt(invocationCount: Int): Boolean =
+    override fun shouldInjectAt(invocationCount: Int): Boolean =
         invocationCount == control.failureInvocationCount
 
-    fun selectedFailpoint(): MdxLiteRtRemoteFailpoint = failpoint
+    override fun selectedFailpoint(): MdxLiteRtRemoteFailpoint = failpoint
 
     @Synchronized
     private fun eventLocked(value: String) {
@@ -367,7 +377,7 @@ private class MdxLiteRtRemoteFaultController(
             profile: MdxExecutionProfile,
             runtimeSettings: MdxRuntimeSettings,
         ): MdxInferenceSession {
-            val session = TrackingSession(
+            val session = MdxLiteRtRemoteFaultTrackingSession(
                 delegate = delegate.create(artifact, profile, runtimeSettings),
                 controller = controller,
             )
@@ -386,86 +396,131 @@ private class MdxLiteRtRemoteFaultController(
         }
     }
 
-    private class TrackingSession(
-        private val delegate: MdxInferenceSession,
-        private val controller: MdxLiteRtRemoteFaultController,
-    ) : MdxInferenceSession {
-        override val diagnostics: MdxRuntimeDiagnostics
-            get() = delegate.diagnostics
-        private val backend = delegate.diagnostics.backend
-        private var closed = false
-        private var cleanupFailureArmed = false
+}
 
-        init {
-            controller.created(backend)
+internal class MdxLiteRtRemoteFaultTrackingSession(
+    private val delegate: MdxInferenceSession,
+    private val controller: MdxLiteRtRemoteFaultSessionTracker,
+) : MdxInferenceSession, MdxWaveformInferenceSession {
+    override val diagnostics: MdxRuntimeDiagnostics
+        get() = delegate.diagnostics
+    private val backend = delegate.diagnostics.backend
+    private var closed = false
+    private var cleanupFailureArmed = false
+
+    init {
+        controller.created(backend)
+    }
+
+    override fun run(
+        inputNchw: FloatArray,
+        shouldCancel: () -> Boolean,
+    ): FloatArray = runTrackedInvocation {
+        delegate.run(inputNchw, shouldCancel)
+    }
+
+    override val waveformSlotCount: Int
+        get() = (delegate as? MdxWaveformInferenceSession)?.waveformSlotCount ?: 0
+    override val waveformDspImplementationId: String
+        get() = (delegate as? MdxWaveformInferenceSession)?.waveformDspImplementationId
+            ?: "unavailable"
+    override val supportsStagedWaveformExecution: Boolean = false
+
+    override fun runWaveform(
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean,
+    ): Array<FloatArray> = runTrackedInvocation {
+        waveformDelegate().runWaveform(waveform, shouldCancel)
+    }
+
+    override fun prepareWaveform(
+        waveform: Array<FloatArray>,
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ): Nothing = stagedWaveformUnsupported()
+
+    override fun invokePreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ): Nothing = stagedWaveformUnsupported()
+
+    override fun readPreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean,
+    ): Nothing = stagedWaveformUnsupported()
+
+    override fun discardPreparedWaveform(slot: Int): Nothing = stagedWaveformUnsupported()
+
+    private fun stagedWaveformUnsupported(): Nothing = throw UnsupportedOperationException(
+        "Remote fault injection requires transactional runWaveform for invocation accounting.",
+    )
+
+    private fun <T> runTrackedInvocation(invocation: () -> T): T {
+        val output = invocation()
+        val invocationCount = controller.invoked(backend)
+        if (backend != MdxInferenceBackend.LiteRtGpu ||
+            !controller.shouldInjectAt(invocationCount)
+        ) {
+            return output
         }
-
-        override fun run(
-            inputNchw: FloatArray,
-            shouldCancel: () -> Boolean,
-        ): FloatArray {
-            val output = delegate.run(inputNchw, shouldCancel)
-            val invocationCount = controller.invoked(backend)
-            if (backend != MdxInferenceBackend.LiteRtGpu ||
-                !controller.shouldInjectAt(invocationCount)
-            ) {
-                return output
-            }
-            return when (controller.selectedFailpoint()) {
-                MdxLiteRtRemoteFailpoint.Invocation -> throw injectedFailure(
-                    "invocation",
-                    MdxLiteRtFailureStage.Invocation,
-                )
-                MdxLiteRtRemoteFailpoint.OutputRead -> throw injectedFailure(
-                    "output-read",
-                    MdxLiteRtFailureStage.OutputRead,
-                )
-                MdxLiteRtRemoteFailpoint.NonFinite -> throw injectedFailure(
-                    "non-finite",
-                    MdxLiteRtFailureStage.OutputValidation,
-                )
-                MdxLiteRtRemoteFailpoint.Cleanup -> {
-                    cleanupFailureArmed = true
-                    throw injectedFailure("pre-cleanup-output-read", MdxLiteRtFailureStage.OutputRead)
-                }
-                else -> output
-            }
-        }
-
-        override fun close() {
-            if (closed) return
-            closed = true
-            var delegateFailure: Throwable? = null
-            try {
-                delegate.close()
-            } catch (error: Throwable) {
-                delegateFailure = error
-            } finally {
-                controller.closed(backend)
-            }
-            if (cleanupFailureArmed) {
-                controller.injected("cleanup")
-                val injected = MdxLiteRtBackendException(
-                    stage = MdxLiteRtFailureStage.Cleanup,
-                    isRecoverable = false,
-                    cause = IllegalStateException("Injected remote GPU cleanup failure."),
-                )
-                delegateFailure?.let(injected::addSuppressed)
-                throw injected
-            }
-            delegateFailure?.let { throw it }
-        }
-
-        private fun injectedFailure(
-            label: String,
-            stage: MdxLiteRtFailureStage,
-        ): MdxLiteRtBackendException {
-            controller.injected(label)
-            return MdxLiteRtBackendException(
-                stage = stage,
-                isRecoverable = true,
-                cause = IllegalStateException("Injected remote GPU $label failure."),
+        return when (controller.selectedFailpoint()) {
+            MdxLiteRtRemoteFailpoint.Invocation -> throw injectedFailure(
+                "invocation",
+                MdxLiteRtFailureStage.Invocation,
             )
+            MdxLiteRtRemoteFailpoint.OutputRead -> throw injectedFailure(
+                "output-read",
+                MdxLiteRtFailureStage.OutputRead,
+            )
+            MdxLiteRtRemoteFailpoint.NonFinite -> throw injectedFailure(
+                "non-finite",
+                MdxLiteRtFailureStage.OutputValidation,
+            )
+            MdxLiteRtRemoteFailpoint.Cleanup -> {
+                cleanupFailureArmed = true
+                throw injectedFailure("pre-cleanup-output-read", MdxLiteRtFailureStage.OutputRead)
+            }
+            else -> output
         }
+    }
+
+    private fun waveformDelegate(): MdxWaveformInferenceSession =
+        delegate as? MdxWaveformInferenceSession
+            ?: error("The tracked inference session has no waveform capability.")
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        var delegateFailure: Throwable? = null
+        try {
+            delegate.close()
+        } catch (error: Throwable) {
+            delegateFailure = error
+        } finally {
+            controller.closed(backend)
+        }
+        if (cleanupFailureArmed) {
+            controller.injected("cleanup")
+            val injected = MdxLiteRtBackendException(
+                stage = MdxLiteRtFailureStage.Cleanup,
+                isRecoverable = false,
+                cause = IllegalStateException("Injected remote GPU cleanup failure."),
+            )
+            delegateFailure?.let(injected::addSuppressed)
+            throw injected
+        }
+        delegateFailure?.let { throw it }
+    }
+
+    private fun injectedFailure(
+        label: String,
+        stage: MdxLiteRtFailureStage,
+    ): MdxLiteRtBackendException {
+        controller.injected(label)
+        return MdxLiteRtBackendException(
+            stage = stage,
+            isRecoverable = true,
+            cause = IllegalStateException("Injected remote GPU $label failure."),
+        )
     }
 }

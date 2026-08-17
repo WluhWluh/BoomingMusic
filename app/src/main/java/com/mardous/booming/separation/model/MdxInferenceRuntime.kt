@@ -236,6 +236,49 @@ interface MdxInferenceSession : AutoCloseable {
     ): FloatArray
 }
 
+internal interface MdxWaveformInferenceSession {
+    val waveformSlotCount: Int
+    val waveformDspImplementationId: String
+    val supportsStagedWaveformExecution: Boolean
+        get() = false
+
+    fun prepareWaveform(
+        waveform: Array<FloatArray>,
+        slot: Int,
+        shouldCancel: () -> Boolean = { false },
+    )
+
+    fun invokePreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean = { false },
+    )
+
+    /** The returned waveform remains valid until this slot is read again or the session closes. */
+    fun readPreparedWaveform(
+        slot: Int,
+        shouldCancel: () -> Boolean = { false },
+    ): Array<FloatArray>
+
+    fun discardPreparedWaveform(slot: Int)
+
+    fun runWaveform(
+        waveform: Array<FloatArray>,
+        shouldCancel: () -> Boolean = { false },
+    ): Array<FloatArray> {
+        val slot = 0
+        try {
+            prepareWaveform(waveform, slot, shouldCancel)
+            invokePreparedWaveform(slot, shouldCancel)
+            return readPreparedWaveform(slot, shouldCancel)
+        } catch (error: Throwable) {
+            runCatching { discardPreparedWaveform(slot) }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
+        }
+    }
+}
+
 interface MdxInferenceSessionFactory {
     val factoryId: String
     val backend: MdxInferenceBackend

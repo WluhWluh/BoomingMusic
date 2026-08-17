@@ -11,6 +11,7 @@ import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxWaveformInferenceSession
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
@@ -260,6 +261,161 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
     }
 
     @Test
+    fun `GPU waveform failure retries original waveform once and latches CPU`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val gpuFailure = backendFailure(MdxLiteRtFailureStage.OutputRead)
+        val gpuSession = RecordingSession(
+            backend = MdxInferenceBackend.LiteRtGpu,
+            waveformRunFailure = gpuFailure,
+            waveformDspImplementationId = "gpu-managed-dsp",
+        )
+        val cpuSession = RecordingSession(
+            backend = MdxInferenceBackend.LiteRtCpu,
+            outputOffset = 2f,
+            waveformDspImplementationId = "cpu-managed-dsp",
+        )
+        val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu) { gpuSession }
+        val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu) { cpuSession }
+        val session = factory(gpuFactory = gpuFactory, cpuFactory = cpuFactory)
+            .create(artifact(profile), profile, MdxRuntimeSettings())
+        val waveformSession = session as MdxWaveformInferenceSession
+        val originalWaveform = arrayOf(
+            floatArrayOf(1f, 2f, 3f),
+            floatArrayOf(4f, 5f, 6f),
+        )
+
+        val first = waveformSession.runWaveform(originalWaveform)
+        val second = waveformSession.runWaveform(arrayOf(floatArrayOf(10f)))
+        val diagnostics = session.autoDiagnostics()
+
+        assertWaveformEquals(
+            arrayOf(floatArrayOf(3f, 4f, 5f), floatArrayOf(6f, 7f, 8f)),
+            first,
+        )
+        assertWaveformEquals(arrayOf(floatArrayOf(12f)), second)
+        assertEquals(1, gpuSession.waveformRunCount)
+        assertEquals(2, cpuSession.waveformRunCount)
+        assertSame(originalWaveform, gpuSession.waveformInputReferences.single())
+        assertSame(originalWaveform, cpuSession.waveformInputReferences.first())
+        assertWaveformEquals(originalWaveform, cpuSession.waveformInputs.first())
+        assertEquals(1, gpuFactory.createCount)
+        assertEquals(1, cpuFactory.createCount)
+        assertTrue(gpuSession.closed)
+        assertEquals("cpu-managed-dsp", waveformSession.waveformDspImplementationId)
+        assertEquals(MdxLiteRtAutoSessionState.CpuFallback, diagnostics.state)
+        assertEquals(MdxInferenceBackend.LiteRtCpu, diagnostics.activeBackend)
+        assertEquals(MdxLiteRtAutoFailureStage.GpuOutputRead, diagnostics.fallbackStage)
+        assertEquals(gpuFailure.message, diagnostics.fallbackReason)
+        assertEquals(MdxInferenceBackend.LiteRtCpu, diagnostics.acceptedOutputBackend)
+        assertEquals(MdxInferenceBackend.LiteRtCpu, session.diagnostics.backend)
+        assertEquals(MdxLiteRtAutoFailureStage.GpuOutputRead.name, session.diagnostics.fallbackStage)
+        assertEquals(gpuFailure.message, session.diagnostics.fallbackReason)
+
+        session.close()
+        assertEquals(1, gpuSession.closeCount)
+        assertEquals(1, cpuSession.closeCount)
+    }
+
+    @Test
+    fun `Auto rejects staged waveform even when the active delegate supports it`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val gpuSession = RecordingSession(
+            backend = MdxInferenceBackend.LiteRtGpu,
+            waveformSlotCount = 2,
+            supportsStagedWaveformExecution = true,
+        )
+        val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu) { gpuSession }
+        val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu)
+        val session = factory(gpuFactory = gpuFactory, cpuFactory = cpuFactory)
+            .create(artifact(profile), profile, MdxRuntimeSettings())
+        val waveformSession = session as MdxWaveformInferenceSession
+        val waveform = arrayOf(floatArrayOf(1f), floatArrayOf(2f))
+
+        assertEquals(2, waveformSession.waveformSlotCount)
+        assertTrue(gpuSession.supportsStagedWaveformExecution)
+        assertFalse(waveformSession.supportsStagedWaveformExecution)
+        listOf<() -> Unit>(
+            { waveformSession.prepareWaveform(waveform, slot = 0) },
+            { waveformSession.invokePreparedWaveform(slot = 0) },
+            { waveformSession.readPreparedWaveform(slot = 0) },
+            { waveformSession.discardPreparedWaveform(slot = 0) },
+        ).forEach { stagedCall ->
+            val error = assertThrows(UnsupportedOperationException::class.java) { stagedCall() }
+            assertEquals(
+                "LiteRT Auto requires transactional runWaveform so GPU failure can replay on CPU.",
+                error.message,
+            )
+        }
+        assertEquals(0, gpuSession.stagedPrepareCount)
+        assertEquals(0, gpuSession.stagedInvocationCount)
+        assertEquals(0, gpuSession.stagedReadCount)
+        assertEquals(0, gpuSession.stagedDiscardCount)
+        assertEquals(0, cpuFactory.createCount)
+        assertEquals(MdxLiteRtAutoSessionState.GpuActive, session.autoDiagnostics().state)
+
+        session.close()
+    }
+
+    @Test
+    fun `waveform cancellation never creates CPU fallback`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val gpuSession = RecordingSession(
+            backend = MdxInferenceBackend.LiteRtGpu,
+            waveformRunFailure = CancellationException("test waveform cancellation"),
+        )
+        val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu) { gpuSession }
+        val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu)
+        val session = factory(gpuFactory = gpuFactory, cpuFactory = cpuFactory)
+            .create(artifact(profile), profile, MdxRuntimeSettings())
+
+        assertThrows(CancellationException::class.java) {
+            (session as MdxWaveformInferenceSession).runWaveform(
+                arrayOf(floatArrayOf(1f)),
+            )
+        }
+
+        assertEquals(0, cpuFactory.createCount)
+        assertEquals(MdxLiteRtAutoSessionState.GpuActive, session.autoDiagnostics().state)
+        assertFalse(gpuSession.closed)
+        session.close()
+        assertEquals(1, gpuSession.closeCount)
+    }
+
+    @Test
+    fun `GPU waveform cleanup failure blocks CPU allocation`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val gpuFailure = backendFailure(MdxLiteRtFailureStage.Invocation)
+        val cleanupFailure = IllegalStateException("GPU waveform cleanup failed")
+        val gpuSession = RecordingSession(
+            backend = MdxInferenceBackend.LiteRtGpu,
+            waveformRunFailure = gpuFailure,
+            closeFailure = cleanupFailure,
+        )
+        val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu) { gpuSession }
+        val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu)
+        val session = factory(gpuFactory = gpuFactory, cpuFactory = cpuFactory)
+            .create(artifact(profile), profile, MdxRuntimeSettings())
+
+        val error = assertThrows(MdxLiteRtAutoInferenceException::class.java) {
+            (session as MdxWaveformInferenceSession).runWaveform(
+                arrayOf(floatArrayOf(1f)),
+            )
+        }
+
+        assertEquals(MdxLiteRtAutoFailureStage.GpuCleanup, error.stage)
+        assertSame(gpuFailure, error.cause)
+        assertSame(cleanupFailure, error.suppressed.single())
+        assertEquals(0, cpuFactory.createCount)
+        assertEquals(MdxLiteRtAutoSessionState.Terminal, session.autoDiagnostics().state)
+        assertEquals(MdxLiteRtAutoFailureStage.GpuCleanup, session.autoDiagnostics().fallbackStage)
+        assertEquals(1, gpuSession.closeCount)
+
+        session.close()
+        assertEquals(MdxLiteRtAutoSessionState.Closed, session.autoDiagnostics().state)
+        assertEquals(1, gpuSession.closeCount)
+    }
+
+    @Test
     fun `cancellation never creates CPU fallback`() {
         val profile = profile("uvr_mdxnet_3_9662")
         val gpuSession = RecordingSession(
@@ -502,6 +658,16 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
         sha256 = requireNotNull(profile.expectedSha256),
     )
 
+    private fun assertWaveformEquals(
+        expected: Array<FloatArray>,
+        actual: Array<FloatArray>,
+    ) {
+        assertEquals(expected.size, actual.size)
+        expected.indices.forEach { channel ->
+            assertArrayEquals(expected[channel], actual[channel], 0f)
+        }
+    }
+
     private class RecordingFactory(
         override val backend: MdxInferenceBackend,
         private val createFailure: Throwable? = null,
@@ -529,10 +695,15 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
         private val outputOffset: Float = 0f,
         private val runFailure: Throwable? = null,
         private val failureOnRun: Int = 1,
+        private val waveformRunFailure: Throwable? = null,
+        private val failureOnWaveformRun: Int = 1,
         private val closeFailure: Throwable? = null,
         private val events: MutableList<String>? = null,
         private val label: String = backend.name,
-    ) : MdxInferenceSession {
+        override val waveformSlotCount: Int = 1,
+        override val waveformDspImplementationId: String = "fake-waveform-dsp",
+        override val supportsStagedWaveformExecution: Boolean = false,
+    ) : MdxInferenceSession, MdxWaveformInferenceSession {
         override val diagnostics = MdxRuntimeDiagnostics(
             runtimeName = "Fake LiteRT",
             backend = backend,
@@ -540,8 +711,16 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
             detail = "test",
         )
         var runCount = 0
+        var waveformRunCount = 0
+        var stagedPrepareCount = 0
+        var stagedInvocationCount = 0
+        var stagedReadCount = 0
+        var stagedDiscardCount = 0
         var closeCount = 0
         val inputs = mutableListOf<FloatArray>()
+        val waveformInputReferences = mutableListOf<Array<FloatArray>>()
+        val waveformInputs = mutableListOf<Array<FloatArray>>()
+        private var preparedWaveform: Array<FloatArray>? = null
         val closed: Boolean
             get() = closeCount > 0
 
@@ -553,6 +732,49 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
             inputs += inputNchw.copyOf()
             if (runCount == failureOnRun) runFailure?.let { throw it }
             return FloatArray(inputNchw.size) { index -> inputNchw[index] + outputOffset }
+        }
+
+        override fun runWaveform(
+            waveform: Array<FloatArray>,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> {
+            waveformRunCount += 1
+            waveformInputReferences += waveform
+            waveformInputs += waveform.map(FloatArray::copyOf).toTypedArray()
+            if (waveformRunCount == failureOnWaveformRun) waveformRunFailure?.let { throw it }
+            return waveform.map { channel ->
+                FloatArray(channel.size) { index -> channel[index] + outputOffset }
+            }.toTypedArray()
+        }
+
+        override fun prepareWaveform(
+            waveform: Array<FloatArray>,
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) {
+            stagedPrepareCount += 1
+            preparedWaveform = waveform
+        }
+
+        override fun invokePreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ) {
+            stagedInvocationCount += 1
+            checkNotNull(preparedWaveform)
+        }
+
+        override fun readPreparedWaveform(
+            slot: Int,
+            shouldCancel: () -> Boolean,
+        ): Array<FloatArray> {
+            stagedReadCount += 1
+            return checkNotNull(preparedWaveform)
+        }
+
+        override fun discardPreparedWaveform(slot: Int) {
+            stagedDiscardCount += 1
+            preparedWaveform = null
         }
 
         override fun close() {
