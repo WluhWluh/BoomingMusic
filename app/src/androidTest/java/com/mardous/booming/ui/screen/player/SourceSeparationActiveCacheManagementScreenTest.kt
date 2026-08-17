@@ -1,5 +1,6 @@
 package com.mardous.booming.ui.screen.player
 
+import android.app.Instrumentation
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.ComponentName
@@ -10,15 +11,17 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.view.MotionEvent
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
@@ -27,6 +30,8 @@ import androidx.media3.session.SessionToken
 import androidx.navigation.fragment.NavHostFragment
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.mardous.booming.R
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
@@ -145,11 +150,21 @@ class SourceSeparationActiveCacheManagementScreenTest {
                     Bundle().apply {
                         putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
                         putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
-                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
                     },
                 )
             }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             assertEquals(SessionResult.RESULT_SUCCESS, enableResult.resultCode)
+            val blendResult = onControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY),
+                    Bundle().apply {
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, TEST_BLEND)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND, false)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, blendResult.resultCode)
+            waitForCondition("non-center mix demand") { processor.blend == TEST_BLEND }
             onControllerThread(mediaController) { mediaController.play() }
             val syncResult = onControllerThread(mediaController) {
                 mediaController.sendCustomCommand(
@@ -171,33 +186,51 @@ class SourceSeparationActiveCacheManagementScreenTest {
                     "playbackSong=${song.id}",
                 )
             }
-
-            compose.activityRule.scenario.onActivity { activity ->
+            onControllerThread(mediaController) { mediaController.pause() }
+            waitForController(mediaController, "temporary UI navigation pause") {
+                !mediaController.playWhenReady && !mediaController.isPlaying
+            }
+            instrumentation.runOnMainSync {
+                val activity = ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)
+                    .filterIsInstance<MainActivity>()
+                    .single()
                 val navHost = activity.supportFragmentManager
                     .findFragmentById(R.id.fragment_container) as NavHostFragment
                 navHost.navController.navigate(R.id.nav_source_separation_settings)
             }
             val manageCaches = context.getString(R.string.source_separation_manage_caches)
             compose.waitUntil(UI_TIMEOUT_MS) {
-                compose.onAllNodesWithText(manageCaches).fetchSemanticsNodes().isNotEmpty()
-            }
-            compose.onNodeWithText(manageCaches)
-                .performScrollTo()
-                .assertIsDisplayed()
-                .performClick()
-            compose.waitUntil(UI_TIMEOUT_MS) {
-                compose.onAllNodesWithTag("source-separation-cache-entry:${manifest.cacheKey}")
+                compose.onAllNodesWithTag("source-separation-settings-list")
                     .fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNodeWithTag("source-separation-cache-delete:${manifest.cacheKey}")
-                .performScrollTo()
-                .performClick()
+            compose.onNodeWithTag("source-separation-settings-list")
+                .performScrollToNode(hasText(manageCaches))
+            compose.onNodeWithText(manageCaches).assertIsDisplayed().performClick()
             compose.waitUntil(UI_TIMEOUT_MS) {
-                compose.onAllNodesWithTag("source-separation-cache-entry:${manifest.cacheKey}")
-                    .fetchSemanticsNodes().isEmpty()
+                compose.onAllNodesWithTag("source-separation-cache-management")
+                    .fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onAllNodesWithTag("source-separation-cache-entry:${manifest.cacheKey}")
-                .assertCountEquals(0)
+            compose.onNodeWithTag("source-separation-cache-management")
+                .performScrollToNode(
+                    hasTestTag("source-separation-cache-entry:${manifest.cacheKey}"),
+                )
+            val deleteBounds = compose
+                .onNodeWithTag("source-separation-cache-delete:${manifest.cacheKey}")
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInWindow
+            onControllerThread(mediaController) { mediaController.play() }
+            waitForController(mediaController, "active multistem playback before UI deletion") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            dispatchTapToSettingsDialog(
+                instrumentation = instrumentation,
+                x = (deleteBounds.left + deleteBounds.right) / 2f,
+                y = (deleteBounds.top + deleteBounds.bottom) / 2f,
+            )
             waitForController(mediaController, "active cache deletion") {
                 mediaController.currentMediaItem?.mediaId == song.id.toString() &&
                     mediaController.playWhenReady &&
@@ -209,6 +242,23 @@ class SourceSeparationActiveCacheManagementScreenTest {
             assertEquals(modelId, selectionStore.selectedModelId())
             assertTrue(SourceSeparationForegroundWorkerDebugBridge.status()
                 .contains("playbackEnabled=false"))
+            onControllerThread(mediaController) { mediaController.pause() }
+            waitForController(mediaController, "UI deletion verification pause") {
+                !mediaController.playWhenReady && !mediaController.isPlaying
+            }
+            compose.waitUntil(UI_TIMEOUT_MS) {
+                compose.onAllNodesWithTag("source-separation-cache-entry:${manifest.cacheKey}")
+                    .fetchSemanticsNodes().isEmpty()
+            }
+            compose.onAllNodesWithTag("source-separation-cache-entry:${manifest.cacheKey}")
+                .assertCountEquals(0)
+            onControllerThread(mediaController) { mediaController.play() }
+            waitForController(mediaController, "original transport resume after UI verification") {
+                mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                    mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds().isEmpty()
+            }
             report.put("status", "complete")
                 .put("cacheKey", manifest.cacheKey)
                 .put("stemIdsBeforeDelete", JSONArray(expectedStemIds))
@@ -312,6 +362,49 @@ class SourceSeparationActiveCacheManagementScreenTest {
         error("Timed out waiting for $operation.")
     }
 
+    private fun dispatchTapToSettingsDialog(
+        instrumentation: Instrumentation,
+        x: Float,
+        y: Float,
+    ) {
+        instrumentation.runOnMainSync {
+            val activity = ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(Stage.RESUMED)
+                .filterIsInstance<MainActivity>()
+                .single()
+            val navHost = activity.supportFragmentManager
+                .findFragmentById(R.id.fragment_container) as NavHostFragment
+            val settings = navHost.childFragmentManager.fragments
+                .filterIsInstance<SourceSeparationSettingsFragment>()
+                .single { fragment -> fragment.dialog?.isShowing == true }
+            val dialog = requireNotNull(settings.dialog)
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(
+                downTime,
+                downTime,
+                MotionEvent.ACTION_DOWN,
+                x,
+                y,
+                0,
+            )
+            val up = MotionEvent.obtain(
+                downTime,
+                downTime + TAP_DURATION_MS,
+                MotionEvent.ACTION_UP,
+                x,
+                y,
+                0,
+            )
+            try {
+                check(dialog.dispatchTouchEvent(down)) { "The delete tap was not accepted." }
+                check(dialog.dispatchTouchEvent(up)) { "The delete tap was not completed." }
+            } finally {
+                down.recycle()
+                up.recycle()
+            }
+        }
+    }
+
     private fun <T> onControllerThread(controller: MediaController, block: () -> T): T {
         if (android.os.Looper.myLooper() == controller.applicationLooper) return block()
         val result = AtomicReference<Result<T>>()
@@ -365,6 +458,8 @@ class SourceSeparationActiveCacheManagementScreenTest {
         const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L
         const val UI_TIMEOUT_MS = 60_000L
         const val POLL_INTERVAL_MS = 50L
+        const val TEST_BLEND = 0.7f
+        const val TAP_DURATION_MS = 50L
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,160}$")
         val SAFE_RELATIVE_PATH = Regex("^[A-Za-z0-9._/-]{1,240}$")
         val PREFERENCE_KEYS = setOf(
