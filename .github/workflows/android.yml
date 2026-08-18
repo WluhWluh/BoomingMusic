@@ -298,7 +298,7 @@ jobs:
             adb wait-for-device
             adb shell getprop > build/ci/x86-product/device-properties.txt
             adb shell pm list packages > build/ci/x86-product/packages-before-test.txt
-            adb logcat -c
+            adb logcat -c || true
             adb logcat -v threadtime > build/ci/x86-product/logcat.txt &
             logcat_pid=$!
             cleanup() {
