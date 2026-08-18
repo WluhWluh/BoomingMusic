@@ -293,7 +293,7 @@ jobs:
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             mkdir -p build/ci/x86-product
             adb wait-for-device
             adb shell getprop > build/ci/x86-product/device-properties.txt
