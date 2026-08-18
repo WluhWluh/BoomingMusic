@@ -290,7 +290,7 @@ jobs:
           ram-size: 4096M
           heap-size: 384M
           disk-size: 8192M
-          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -prop dalvik.vm.heapsize=384m
           disable-animations: true
           script: bash tools/ci/run_x86_product_gate.sh
         env:
