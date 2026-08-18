@@ -3,6 +3,7 @@ package com.mardous.booming.separation.model.litert
 import android.net.Uri
 import android.os.Build
 import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -47,8 +48,9 @@ import org.koin.java.KoinJavaComponent.get
 
 @RunWith(AndroidJUnit4::class)
 class MdxLiteRtX86GithubProductDeviceTest {
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun downloadsAndExecutesStandardGithubProductPath() {
+        stage("test-start")
         val arguments = InstrumentationRegistry.getArguments()
         assumeTrue(arguments.getString(ARG_RUN_GATE) == "true")
         assumeTrue(currentProcessAbi() == MdxRuntimeAbi.X86.androidName)
@@ -67,8 +69,10 @@ class MdxLiteRtX86GithubProductDeviceTest {
             SourceSeparationRuntimeCatalog::class.java,
         )
         val runtimeEntry = requireNotNull(runtimeCatalog.entryForAbi(MdxRuntimeAbi.X86.androidName))
+        stage("runtime-download-start:${runtimeEntry.componentId}")
         val runtimeStore = get<SourceSeparationRuntimeStore>(SourceSeparationRuntimeStore::class.java)
         val installedRuntime = runtimeStore.install(runtimeEntry.componentId)
+        stage("runtime-download-complete:${installedRuntime.state}")
         assertEquals(SourceSeparationRuntimeState.Installed, installedRuntime.state)
         assertEquals(
             EXPECTED_RUNTIME_ARTIFACT,
@@ -80,7 +84,16 @@ class MdxLiteRtX86GithubProductDeviceTest {
         )
         val installedModel = get<SourceSeparationPresetDownloader>(
             SourceSeparationPresetDownloader::class.java,
-        ).download(MODEL_ID)
+        ).download(MODEL_ID) { progress ->
+            if (progress.downloadedBytes == 0L ||
+                progress.downloadedBytes == progress.totalBytes
+            ) {
+                stage(
+                    "model-download:${progress.downloadedBytes}/${progress.totalBytes}",
+                )
+            }
+        }
+        stage("model-download-complete:${installedModel.byteSize}")
         repository.activate(
             sha256 = installedModel.sha256,
             platform = MdxRuntimePlatform(
@@ -128,6 +141,7 @@ class MdxLiteRtX86GithubProductDeviceTest {
                 input = input,
                 preflight = preflight,
             )
+            stage("separation-start")
             runtimeFacade.entries()
                 .filter { it.cacheKey == runtimeSong.cacheKey }
                 .forEach { runtimeFacade.delete(it.cacheKey) }
@@ -137,6 +151,7 @@ class MdxLiteRtX86GithubProductDeviceTest {
                 tryGpu = false,
                 windowDecodeEnabled = true,
             )
+            stage("separation-returned:${rawResult::class.java.simpleName}")
             val result = rawResult as? SourceSeparationModelAwareEngineResult.Completed
                 ?: error("The x86 product path did not complete a new cache: $rawResult")
 
@@ -160,6 +175,7 @@ class MdxLiteRtX86GithubProductDeviceTest {
                 assertEquals(2, playback?.stemFiles?.size)
                 assertTrue(playback?.stemFiles?.all(File::isFile) == true)
             }
+            stage("cache-open-complete")
             Log.i(
                 TAG,
                 "x86 GitHub product gate passed through the bound remote process; " +
@@ -174,6 +190,12 @@ class MdxLiteRtX86GithubProductDeviceTest {
             sourceFile.delete()
         }
     }
+
+    private fun stage(name: String) {
+        Log.i(TAG, "stage=$name elapsedMs=${SystemClock.elapsedRealtime() - testStartMs}")
+    }
+
+    private val testStartMs = SystemClock.elapsedRealtime()
 
     private fun writeFixtureWav(file: File) {
         require(file.parentFile?.isDirectory == true || file.parentFile?.mkdirs() == true)
@@ -255,5 +277,6 @@ class MdxLiteRtX86GithubProductDeviceTest {
         const val SAMPLE_RATE = 44_100
         const val CHANNEL_COUNT = 2
         const val PCM16_BYTES = 2
+        const val TEST_TIMEOUT_MS = 30 * 60 * 1_000L
     }
 }
