@@ -4,9 +4,9 @@ Status: active model-catalog and release-qualification plan. Runtime setup,
 lifecycle/cache ownership, and N-stem playback continue under their dedicated
 roadmaps; completed sections here remain historical implementation evidence.
 
-Updated: 2026-08-17
+Updated: 2026-08-18
 
-## Current x86 Model Policy (2026-08-17)
+## Current x86 Model Policy (2026-08-18)
 
 All published MDX entries remain selectable experimental models on 32-bit
 x86. Historical `Unsupported` or `Rejected` qualification records continue to
@@ -16,12 +16,15 @@ product. Explicit user attempts run CPU-only through the dedicated-process JVM
 `TensorBuffer` fallback. Native-managed x86, GPU, NPU, and generic HTDemucs
 x86 qualification remain outside the claim.
 
-The API 26 x86 release gate is intentionally environment-specific: 4 GiB
+The API 26 x86 qualification is intentionally environment-specific: 4 GiB
 guest RAM and a 384 MiB ART heap preserve enough contiguous 32-bit address
 space for the approximately 500-600 MiB native XNNPACK mapping. The app does
 not enforce that limit. Models with larger memory demand or devices with a
 different address layout may fail and should report a normal allocation error.
-This risk affects qualification and Release Notes, not model visibility.
+The hosted GitHub x86 product-inference job was removed after its Linux
+runner's TCG-only execution timed out; x86 product evidence is retained only
+from the persistent local AVD/real-device path. This risk affects
+qualification and Release Notes, not model visibility.
 
 ## LiteRT 2.2 Formal-Migration Checkpoint (2026-08-17)
 
@@ -31,8 +34,10 @@ the current runtime and executable baseline for model qualification. The exact
 qualified arm64 profile, the S25 MDX matrix covers all 13 frozen tensor shapes,
 and 9662 passes the full-song CPU/GPU and one-way fallback paths. API 37 x86_64
 passes native-managed 9662, while API 26 x86 passes the standard GitHub
-runtime/model download and bound-process JVM fallback without an ABI-wide
-activation block.
+runtime/model download and bound-process JVM fallback on the persistent local
+AVD without an ABI-wide activation block. Hosted GitHub CI no longer runs x86
+inference; the local result and failed hosted experiment are recorded in
+[`x86-results-2026-08-18.md`](validation/litert-2.2-migration/x86-results-2026-08-18.md).
 
 Official HTDemucs 4-stem, official 6-stem, and guitar-ft 6-stem retain their
 published artifact and executable-contract hashes and pass the current CPU

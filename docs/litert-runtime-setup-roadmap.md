@@ -4,9 +4,9 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-17
+Updated: 2026-08-18
 
-## Current x86 GitHub Policy (2026-08-17)
+## Current x86 GitHub Policy (2026-08-18)
 
 The GitHub product supports CPU runtime delivery and explicit source
 separation attempts on all four packaged ABIs, including 32-bit x86. Runtime
@@ -15,9 +15,12 @@ disable the feature solely because the current ABI is x86. The x86 execution
 path remains CPU-only, experimental, and backed by the dedicated-process JVM
 `TensorBuffer` fallback; native-managed x86, GPU, and NPU remain unclaimed.
 
-The reproducible API 26 x86 AVD and both GitHub workflow gates use 4 GiB guest
-RAM with a 384 MiB ART heap. The local `Medium_Phone` AVD keeps this heap as a
-persistent environment setting. Larger ART heaps have reduced the contiguous
+The reproducible API 26 x86 AVD uses 4 GiB guest RAM with a 384 MiB ART heap.
+The local `Medium_Phone` AVD keeps this heap as a persistent environment
+setting. Hosted GitHub Actions cannot provide a reliable x86 product-inference
+environment: its Linux runner disables hardware acceleration, and the action's
+`heap-size` input did not result in the required boot property. Larger ART heaps
+have reduced the contiguous
 32-bit address space available to XNNPACK and failed controlled tests. This is
 a test-environment requirement only: the app must not enforce a heap/RAM
 minimum, hide models, or add an x86-specific setup blocker. Runtime or model
@@ -32,8 +35,9 @@ runtime-specific migration gates for exact `2.2.0-bss.2`: the classes-only AAR
 and source lock, four CPU components, bounded arm64 GPU component, five
 runtime-free APKs, product DSP on all four ABIs, real GitHub delivery, S25/S10
 CPU/GPU execution, API 37 x86_64 native-managed CPU execution, and API 26 x86
-bound-process JVM fallback all pass. The detailed identities and raw-report
-roots are in
+bound-process JVM fallback pass locally. Hosted GitHub Actions no longer runs
+x86 product inference. The detailed identities, local x86 record, and
+raw-report roots are in
 [formal-integration-2026-08-17.md](validation/litert-2.2-migration/formal-integration-2026-08-17.md).
 
 This checkpoint supersedes 2.1.5 runtime identities and old x86
@@ -1268,8 +1272,11 @@ are either completed or explicitly waived with a documented support boundary.
   playback underruns. These measurements become the comparison baseline for
   every NPU claim.
 - [x] Record downloaded CPU-loader support for S10 arm32, S25 arm64, API 26
-  x86, and API 37 x86_64; additionally gate the API 26 x86 GitHub product on
-  real runtime/model acquisition, JVM inference, and completed-cache opening.
+  x86, and API 37 x86_64; manually qualify the API 26 x86 GitHub product on
+  the persistent local AVD using real runtime/model acquisition, JVM
+  inference, and completed-cache opening. Hosted CI is not an x86 inference
+  gate; see
+  [x86-results-2026-08-18.md](validation/litert-2.2-migration/x86-results-2026-08-18.md).
 - [ ] Close the Phase 1 ABI/API support table by adding API 29 evidence or
   explicitly marking it unavailable, and assign non-arm64 rows a loader-only
   or ordinary-player tier. NPU work may target only a named qualified arm64

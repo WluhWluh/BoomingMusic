@@ -58,41 +58,8 @@ jobs:
           name: artifacts-github-release
           path: app/build/outputs/apk/github/release/BoomingSS-*.apk
 
-  litert-x86-product:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-java@v5
-        with:
-          java-version: 21
-          distribution: 'zulu'
-          cache: gradle
-
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
-
-      - name: Execute downloaded x86 source-separation product path
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 26
-          arch: x86
-          cores: 4
-          ram-size: 4096M
-          heap-size: 384M
-          disk-size: 8192M
-          disable-animations: true
-          script: >-
-            ./gradlew connectedGithubDebugAndroidTest
-            "-Pandroid.testInstrumentationRunnerArguments.class=com.mardous.booming.separation.model.litert.MdxLiteRtX86GithubProductDeviceTest#downloadsAndExecutesStandardGithubProductPath"
-            -Pandroid.testInstrumentationRunnerArguments.runX86GithubProductGate=true
-            --stacktrace
-        env:
-          RELEASE_TYPE: "CI"
-
   publish-release:
-    needs: [build, litert-x86-product]
+    needs: [build]
     runs-on: ubuntu-latest
     if: > # TEMPORARY: Prevent releases for alpha/beta/rc tags.
       !contains(github.ref_name, 'alpha') && 

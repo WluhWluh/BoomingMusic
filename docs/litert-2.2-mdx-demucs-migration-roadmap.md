@@ -1,14 +1,16 @@
 # LiteRT 2.2 MDX and HTDemucs Migration Roadmap
 
-Status: Phase 5 formal integration is complete at `5ec08d84`; Phase 6 pushed-CI
-closeout is in progress. This document is the implementation authority for
+Status: Phase 5 formal integration is complete at `5ec08d84`; Phase 6 closeout
+is complete for the retained host/build gates. The hosted x86 product gate was
+closed after the recorded experiment. This document is the implementation
+authority for
 moving the current downloadable-runtime product path to exact LiteRT
 `2.2.0-bss.2` and integrating the qualified native MDX and CPU HTDemucs
 pipelines. It does not authorize QNN, HTDemucs GPU, stable model-tier promotion,
 or a generic LiteRT 2.2.x runtime.
 
 Created: 2026-08-16
-Updated: 2026-08-17
+Updated: 2026-08-18
 
 ## Frozen Branch and Source Boundary
 
@@ -185,15 +187,16 @@ from mapping its address space. Two 384 MiB runs passed the frozen ORT oracle;
 an additional-session replacement attempt still exposed address
 fragmentation. The local `Medium_Phone` AVD therefore keeps both
 `vm.heapSize=384` and a persistent API 26 `/data/local.prop` override, while
-GitHub CI and release jobs declare `heap-size: 384M`. This is a qualification
-environment constraint, not an app-side RAM check or user-facing restriction.
+The hosted GitHub x86 product job was removed after its Linux runner could not
+provide a reliable equivalent environment. This is a qualification environment
+constraint, not an app-side RAM check or user-facing restriction.
 
 At the current branch state, the standard JVM fallback produced 97.5986 dB
 SNR and maximum absolute error `5.9530e-5` against the frozen ORT reference.
 Two fresh product-process runs also downloaded the real x86 runtime and 9662
 model, published a completed two-stem cache, opened it through the playback
-repository, and cleaned it successfully. CI and release publication must run
-`MdxLiteRtX86GithubProductDeviceTest` through those production providers.
+repository, and cleaned it successfully. The complete record is
+[`x86-results-2026-08-18.md`](validation/litert-2.2-migration/x86-results-2026-08-18.md).
 
 Future GitHub Release Notes need only the concise limitation: "32-bit x86 and
 high-memory models may fail depending on device memory layout."
@@ -359,9 +362,10 @@ Current evidence as of 2026-08-17:
   wait counts, and the S10 CPU matrix completed with bounded post-close
   accounting;
 - direct exact-runtime smokes pass on S10 armeabi-v7a, API 37 x86_64, and API
-  26 x86. The later x86 product gate additionally exercises GitHub delivery,
-  bound-process JVM inference, completed cache publication, and playback
-  opening at the frozen 384 MiB ART heap;
+  26 x86. A separate local x86 product experiment additionally exercised
+  GitHub delivery, bound-process JVM inference, completed cache publication,
+  and playback opening at the frozen 384 MiB ART heap; its hosted CI
+  counterpart was closed after the recorded environment failure;
 - at `15bbe455`, the 273.8-second 9662 bounded-GPU product run reached its
   first playback-ready window in 3,355 ms and completed in 32,619 ms. Its
   completed indexed-FLAC cache then passed a 60-second MediaSession soak with
@@ -710,7 +714,7 @@ Also require:
 | S10 arm64 | CPU/GPU runtime install, representative MDX shapes, official 6-stem and guitar-ft, long-session memory/thermal, cancel/supersession, hard termination. |
 | S10 armeabi-v7a | CPU runtime, MDX managed smoke, official 4/6-stem lifecycle, process recycle; no GPU claim. |
 | API 37 x86_64 AVD | CPU runtime/store and native-managed MDX smoke. |
-| API 26 x86 AVD | Real GitHub runtime/model download plus bound-process JVM MDX fallback and completed-cache gate at 4 GiB RAM / 384 MiB ART heap; native-managed remains rejected and the app applies no ABI-wide block. |
+| API 26 x86 AVD | Manual/local qualification using real GitHub runtime/model download plus bound-process JVM MDX fallback and completed-cache opening at 4 GiB RAM / 384 MiB ART heap; native-managed remains rejected and the app applies no ABI-wide block. Hosted GitHub CI does not run this inference gate. |
 
 All device tests must install runtime and model assets through the same
 providers/stores used by the product. Test-only bundled native libraries or
@@ -754,8 +758,9 @@ docs(separation): reconcile runtime and model roadmaps
 
 ## Phase 6: Migration Closeout
 
-Status: in progress. Local closeout gates pass; the pushed GitHub CI gate
-remains.
+Status: complete. Local closeout gates pass; host lint/unit/build, APK
+packaging, and supply-chain CI gates pass. Hosted x86 product inference is
+explicitly excluded after the recorded experiment.
 
 - [x] Confirm the branch contains no generated binaries, raw test audio, runtime
   downloads, device output, or relay payloads.
@@ -763,8 +768,11 @@ remains.
   commit is present.
 - [x] Confirm the final diff retains the three latest-base playback commits and
   their tests.
-- [ ] Re-run the complete GitHub CI workflow on the pushed candidate.
-- [ ] Mark this roadmap complete only after the exact pushed commit passes.
+- [x] Re-run the host/build/supply-chain portions of GitHub CI on the pushed
+  candidate.
+- [x] Record and close the hosted x86 emulator experiment without treating it
+  as product evidence.
+- [x] Mark this roadmap complete after the exact retained gates pass.
 - [x] Preserve `experiment/litert-2.2-mdx-demucs-migration` as experimental
   provenance until the formal migration is accepted; do not force-update or
   delete it during this work.
@@ -802,7 +810,7 @@ document.
 | GPU delivery | arm64 bounded FP32 profile only; positive equal dispatch/wait counts. |
 | MDX | 13 shapes, finite output, exact slot repeat, profile thresholds, product lifecycle, correct cache identity. |
 | HTDemucs | Frozen 4/6/guitar contracts, finite energy-aware stems, ordered PCM/cache publication, CPU-only. |
-| x86 | User-accessible experimental GitHub CPU tier through the bound-process JVM fallback; API 26 CI uses 4 GiB RAM / 384 MiB ART heap; no native-managed, GPU, NPU, or stable-support claim. |
+| x86 | User-accessible experimental GitHub CPU tier through the bound-process JVM fallback; local API 26 AVD evidence uses 4 GiB RAM / 384 MiB ART heap; no hosted-CI inference, native-managed, GPU, NPU, or stable-support claim. |
 | Cancellation | Cooperative first, typed hard termination after grace, durable partial cache and ownership recovery. |
 | Playback | Ready-frontier, rapid-transition, EOF, seek, model-switch, FLAC, and active-delete regressions pass. |
 | Efficiency | No repeated full hashes, no Java tensor churn on accepted ARM native paths, bounded memory/GC and recorded thermal state. |
