@@ -23,6 +23,24 @@ not enforce that limit. Models with larger memory demand or devices with a
 different address layout may fail and should report a normal allocation error.
 This risk affects qualification and Release Notes, not model visibility.
 
+## LiteRT 2.2 Formal-Migration Checkpoint (2026-08-17)
+
+The formal `migration/litert-2.2-mdx-demucs` candidate `5ec08d84` now provides
+the current runtime and executable baseline for model qualification. The exact
+`2.2.0-bss.2` CPU runtime passes on four ABIs, bounded FP32 GPU remains the
+qualified arm64 profile, the S25 MDX matrix covers all 13 frozen tensor shapes,
+and 9662 passes the full-song CPU/GPU and one-way fallback paths. API 37 x86_64
+passes native-managed 9662, while API 26 x86 passes the standard GitHub
+runtime/model download and bound-process JVM fallback without an ABI-wide
+activation block.
+
+Official HTDemucs 4-stem, official 6-stem, and guitar-ft 6-stem retain their
+published artifact and executable-contract hashes and pass the current CPU
+product/cache path on the claimed arm targets. These results do not promote any
+entry to stable, qualify HTDemucs GPU/x86/NPU, or close the independent Phase 7
+promotion matrix. Exact identities and raw-report roots are in
+[formal-integration-2026-08-17.md](validation/litert-2.2-migration/formal-integration-2026-08-17.md).
+
 ## Current Release Baseline (2026-08-07)
 
 The model repository has advanced to immutable Release
@@ -77,11 +95,13 @@ fallback policy. Completed packaged-runtime and `tryGpu` text later in this
 document is historical implementation evidence when it conflicts with the
 dedicated runtime setup contract.
 
-### Current product snapshot (2026-08-08)
+### Current product snapshot (2026-08-17)
 
-- `experiment/downloadable-litert-core` is the current Booming SS integration
-  branch. The APK contains the classes-only LiteRT API; native CPU/GPU
-  components are downloaded and managed through the runtime setup contract.
+- `migration/litert-2.2-mdx-demucs` at `5ec08d84` is the current formal Booming
+  SS integration candidate, based on `experiment/downloadable-litert-core`.
+  The APK contains the classes-only LiteRT API; exact `2.2.0-bss.2` native
+  CPU/GPU components are downloaded and managed through the runtime setup
+  contract.
 - `UVR_MDXNET_3_9662` FP32 remains the sole recommended/default candidate. It
   has the broadest CPU/GPU, lifecycle, and playback evidence, but stable release
   maturity still waits for the final decision matrix and immutable

@@ -1,10 +1,11 @@
 # LiteRT 2.2 MDX and HTDemucs Migration Roadmap
 
-Status: active formal migration plan. This document is the implementation
-authority for moving the current downloadable-runtime product path to exact
-LiteRT `2.2.0-bss.2` and integrating the qualified native MDX and CPU
-HTDemucs pipelines. It does not authorize QNN, HTDemucs GPU, stable model-tier
-promotion, or a generic LiteRT 2.2.x runtime.
+Status: Phase 5 formal integration is complete at `5ec08d84`; Phase 6 pushed-CI
+closeout is in progress. This document is the implementation authority for
+moving the current downloadable-runtime product path to exact LiteRT
+`2.2.0-bss.2` and integrating the qualified native MDX and CPU HTDemucs
+pipelines. It does not authorize QNN, HTDemucs GPU, stable model-tier promotion,
+or a generic LiteRT 2.2.x runtime.
 
 Created: 2026-08-16
 Updated: 2026-08-17
@@ -666,18 +667,17 @@ test(separation): expose deterministic UI debug surfaces
 
 ## Phase 5: Formal Integration Qualification
 
-Status: in progress.
+Status: complete at `5ec08d84`.
 
-The `49efc109` checkpoint has a clean 780-test host suite, passing GitHub-debug
-lint, a successful minified GitHub Release build, verified runtime-free
-four-ABI and universal APKs with the product DSP library in every ABI, and a
-passing API 26 x86 GitHub product gate after a no-override cold AVD restart.
-The later `15bbe455` and `a25198b5` S25 full-song MDX, playback, model-switch,
-and real GPU-to-CPU fallback runs close the Phase 2 device gaps. The
-`2b0a6dbe`, `ed905c8b`, and `447175fb` HTDemucs full-song, resource, and arm32
-terminal-recycle runs close the Phase 3 device gaps. These are valid
-incremental evidence, not the Phase 5 exit: a clean exact-candidate aggregate
-rerun and report, and the pushed CI gates below still apply.
+The exact source-clean candidate has a passing 785-test GitHub-debug host
+suite, lint, four-ABI native build, AndroidTest build, runtime-free five-APK
+inventory, product DSP inventory, classes-only AAR/source-lock verification,
+four-ABI CPU catalog verification, bounded-GPU catalog verification, and a
+dependency graph with no stock LiteRT Maven artifact. S25/S10 evidence from
+app-source tip `7574ce0d` remains exact because the only later commit changes a
+validation PowerShell launcher and `git diff 7574ce0d..5ec08d84 -- app` is
+empty. API 37 x86_64 and API 26 x86 were rerun against APKs built and hashed
+from `5ec08d84`.
 
 ### Phase 5A: Host and packaging gates
 
@@ -731,6 +731,16 @@ models cannot satisfy a formal gate.
 - Do not mark a historical phase incomplete merely because this migration
   introduces a newer implementation.
 
+Completed evidence:
+
+- [formal-integration-2026-08-17.md](validation/litert-2.2-migration/formal-integration-2026-08-17.md)
+  records the exact candidate, APK/test hashes, runtime and model identities,
+  host gates, five-target device matrix, raw-report roots, donor differences,
+  and the API 37 stale-AVD diagnosis.
+- The runtime, multi-stem, and multi-preset ownership roadmaps now carry a
+  dated LiteRT 2.2 checkpoint without rewriting their historical phase
+  evidence or opening QNN/HTDemucs GPU support.
+
 **Phase 5 exit:** host, packaging, four-ABI, S25/S10, playback, lifecycle, and
 evidence gates all pass at one exact clean candidate revision.
 
@@ -744,17 +754,18 @@ docs(separation): reconcile runtime and model roadmaps
 
 ## Phase 6: Migration Closeout
 
-Status: not started. Phase 6 remains blocked on the open Phase 5 gates above.
+Status: in progress. Local closeout gates pass; the pushed GitHub CI gate
+remains.
 
-- Confirm the branch contains no generated binaries, raw test audio, runtime
+- [x] Confirm the branch contains no generated binaries, raw test audio, runtime
   downloads, device output, or relay payloads.
-- Confirm every phase commit is independently reviewable and no donor merge
+- [x] Confirm every phase commit is independently reviewable and no donor merge
   commit is present.
-- Confirm the final diff retains the three latest-base playback commits and
+- [x] Confirm the final diff retains the three latest-base playback commits and
   their tests.
-- Re-run the complete GitHub CI workflow on the pushed candidate.
-- Mark this roadmap complete only after the exact pushed commit passes.
-- Preserve `experiment/litert-2.2-mdx-demucs-migration` as experimental
+- [ ] Re-run the complete GitHub CI workflow on the pushed candidate.
+- [ ] Mark this roadmap complete only after the exact pushed commit passes.
+- [x] Preserve `experiment/litert-2.2-mdx-demucs-migration` as experimental
   provenance until the formal migration is accepted; do not force-update or
   delete it during this work.
 

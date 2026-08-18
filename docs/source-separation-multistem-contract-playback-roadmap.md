@@ -69,6 +69,18 @@ mismatch. The ignored reports are under
 confirmation supplements rather than replaces the broader 2026-08-14 Phase 8
 boundary matrix below.
 
+The final LiteRT 2.2 migration checkpoint `5ec08d84` now consolidates the
+source-equivalent S25/S10 product evidence with exact-candidate API 37 x86_64
+and API 26 x86 rows. S25 reopened ordered 4/6-stem caches for all three frozen
+HTDemucs candidates and passed cancellation, supersession, process-death, seek,
+completed-cache switching, and 2/4/6-stem panel/lyrics-overlay reconciliation.
+S10 passed official 6-stem and guitar-ft on arm64 plus official 4/6-stem
+terminal recycling on `armeabi-v7a`. The three executable sidecars and artifact
+hashes remain unchanged and CPU-only. See
+[formal-integration-2026-08-17.md](validation/litert-2.2-migration/formal-integration-2026-08-17.md).
+This migration checkpoint does not change the established stem-label or
+stem-icon mappings and does not qualify HTDemucs on x86, GPU, or NPU.
+
 The current GitHub product also exposes source separation on API 26 x86
 through the CPU-only JVM MDX fallback; it does not apply an ABI-wide UI or
 runtime block. That result qualifies the two-stem MDX product/cache route at

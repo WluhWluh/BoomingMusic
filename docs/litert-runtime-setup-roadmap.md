@@ -25,6 +25,25 @@ allocation failures remain ordinary actionable errors. Release Notes should
 state only that 32-bit x86 and high-memory models may fail depending on device
 memory layout.
 
+## LiteRT 2.2 Formal-Migration Checkpoint (2026-08-17)
+
+The formal `migration/litert-2.2-mdx-demucs` candidate `5ec08d84` closes the
+runtime-specific migration gates for exact `2.2.0-bss.2`: the classes-only AAR
+and source lock, four CPU components, bounded arm64 GPU component, five
+runtime-free APKs, product DSP on all four ABIs, real GitHub delivery, S25/S10
+CPU/GPU execution, API 37 x86_64 native-managed CPU execution, and API 26 x86
+bound-process JVM fallback all pass. The detailed identities and raw-report
+roots are in
+[formal-integration-2026-08-17.md](validation/litert-2.2-migration/formal-integration-2026-08-17.md).
+
+This checkpoint supersedes 2.1.5 runtime identities and old x86
+packaged-native descriptions in historical sections; it does not rewrite those
+records. It also does not close the separate pre-NPU release-confidence work
+below: stable Quick Setup/Runtime Management UI and accessibility coverage,
+the final repeatable CPU/GPU power/thermal/underrun baseline, the short human
+handoff, and the API 29 disposition remain explicit gates before product NPU
+exposure.
+
 ## Current Model-Delivery Baseline (2026-08-07)
 
 `WluhWluh/bss-tflite` now publishes the immutable prerelease
@@ -1097,9 +1116,10 @@ death, cache playback, and diagnostics export were exercised through the real
 
 ### Pre-Phase 5 gate: close the CPU/GPU product baseline
 
-**Status: release graph, contract, implementation, and S10/S25 functional
-downloaded-path gates are closed; performance/thermal measurement, stable UI
-coverage, and the short human handoff qualification gates remain open before
+**Status: the exact LiteRT 2.2 release graph, contract, four-ABI implementation,
+and S10/S25 functional downloaded-path gates are closed at `5ec08d84`;
+performance/thermal measurement, stable UI/accessibility coverage, API 29
+disposition, and the short human handoff qualification gates remain open before
 any NPU capability is exposed.**
 
 The
@@ -1167,9 +1187,10 @@ change the frozen source-separation algorithm:
    inference process after terminal runs; it still has no GPU row. API 26 x86
    now has a separate experimental product row using real GitHub delivery,
    bound-process JVM inference, and completed-cache playback at the frozen
-   384 MiB ART heap. x86_64 and API 29 remain loader-only or unqualified unless
-   separately tested. NPU work may initially target only a named, qualified
-   arm64 device and exact model/runtime combination.
+   384 MiB ART heap. API 37 x86_64 now has downloaded CPU runtime/store and
+   native-managed 9662 evidence but no GPU promotion; API 29 remains
+   unqualified unless separately tested. NPU work may initially target only a
+   named, qualified arm64 device and exact model/runtime combination.
 
 Scope boundary: keep the Demucs research matrix separate from this gate. Its
 CPU, hybrid GPU, and failed QNN rows may inform future adapter work, but cannot
