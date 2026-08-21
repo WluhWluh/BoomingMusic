@@ -7,6 +7,9 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.mardous.booming.playback.SourceSeparationFileStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationFlacStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationAacStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationAacPlaybackProfile
+import com.mardous.booming.playback.SourceSeparationFallbackStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationPlaybackFrameAvailability
 import com.mardous.booming.playback.SourceSeparationPlaybackDataState
 import com.mardous.booming.playback.SourceSeparationPlaybackStemSourceFactory
@@ -21,6 +24,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -30,11 +34,20 @@ class PreparedSourceSeparationPlaybackInputs internal constructor(
     stemIds: List<String>,
     internal val stemSampleRate: Int,
     internal val stemChannelCount: Int,
+    internal val stemFrameCount: Long?,
     internal val factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    internal val aacProfiles: List<SourceSeparationAacPlaybackProfile?> =
+        List(stemFiles.size) { null },
     internal val frameAvailability: SourceSeparationPlaybackFrameAvailability? = null,
 ) {
     internal val stemFiles: List<File> = stemFiles.toList()
     internal val stemIds: List<String> = stemIds.toList()
+
+    /** AAC-only sessions can publish the first stable mixed block immediately. */
+    internal val supportsFastResume: Boolean
+        get() = factories.size > 1 &&
+                aacProfiles.all { profile -> profile != null } &&
+                factories.all { factory -> factory.fastSeekParallelism > 1 }
 
     init {
         require(this.stemFiles.isNotEmpty()) { "Prepared playback requires at least one stem." }
@@ -43,6 +56,9 @@ class PreparedSourceSeparationPlaybackInputs internal constructor(
         }
         require(this.factories.size == this.stemFiles.size) {
             "Prepared playback factories must match the stem file count."
+        }
+        require(this.aacProfiles.size == this.stemFiles.size) {
+            "Prepared AAC profiles must match the stem file count."
         }
     }
 
@@ -61,6 +77,16 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     var debugTraceSink: ((String) -> Unit)? = null
 
+    /**
+     * Adds a non-invasive diagnostic observer. Unlike [debugTraceSink], observers
+     * survive PlaybackService installing or removing its own trace sink, which is
+     * useful for short-lived device tests.
+     */
+    internal fun addDebugTraceObserver(observer: (String) -> Unit): Closeable {
+        debugTraceObservers += observer
+        return Closeable { debugTraceObservers.remove(observer) }
+    }
+
     @Volatile
     var mixedOutputStartedSink: ((outputGeneration: Long) -> Unit)? = null
 
@@ -73,7 +99,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var active = false
 
+    @Volatile
+    private var aacFastResumeActive = false
+
     private val dataPlaneUnderflowSignaled = AtomicBoolean(false)
+    private val debugTraceObservers = CopyOnWriteArrayList<(String) -> Unit>()
     private val gainGeneration = AtomicLong()
     private val gainSnapshot = AtomicReference(GainSnapshot.centered())
     private var appliedGainGeneration = 0L
@@ -141,6 +171,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         inputMode: InputMode = InputMode.OriginalSource,
         stemSampleRate: Int = DEFAULT_SAMPLE_RATE,
         stemChannelCount: Int = CHANNEL_COUNT_STEREO,
+        stemFrameCount: Long? = null,
+        aacProfiles: List<SourceSeparationAacPlaybackProfile?>? = null,
         mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
         preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
         blendEndpointStemIds: List<String>? = null,
@@ -167,6 +199,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             }.toIntArray()
         }
         val expectedGainCount = stemFiles.size
+        val effectiveMixedOutputPrerollMs = if (preparedInputs?.supportsFastResume == true) {
+            0L
+        } else {
+            mixedOutputReadyPrerollMs
+        }
         val normalizedGains = if (initialGains.isEmpty()) {
             if (blendEndpointIndexes != null) {
                 SourceSeparationMdxMixPolicy.orderedGains(
@@ -189,10 +226,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             debugQueueSeq.set(0)
             debugQueueTraceRemaining = DEBUG_INITIAL_QUEUE_TRACE_COUNT
             dataPlaneUnderflowSignaled.set(false)
+            aacFastResumeActive = preparedInputs?.supportsFastResume == true
             this.inputMode = inputMode
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
-            this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
+            this.mixedOutputReadyPrerollMs = effectiveMixedOutputPrerollMs.coerceAtLeast(0L)
             resetMixedOutputNotificationLocked()
             configuredStemCount = expectedGainCount
             this.blendEndpointStemIndexes = blendEndpointIndexes
@@ -203,7 +241,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 require(prepared.stemFiles == stemFiles &&
                         prepared.stemIds == stemIds &&
                         prepared.stemSampleRate == this.stemSampleRate &&
-                        prepared.stemChannelCount == this.stemChannelCount
+                        prepared.stemChannelCount == this.stemChannelCount &&
+                        (stemFrameCount == null || prepared.stemFrameCount == stemFrameCount)
                 ) {
                     "Prepared playback inputs do not match the requested stem session."
                 }
@@ -213,10 +252,21 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 stemIds = stemIds,
                 sampleRate = this.stemSampleRate,
                 channelCount = this.stemChannelCount,
+                frameCount = stemFrameCount,
+                aacProfiles = aacProfiles,
             )
             if (engineFactories != null) {
                 val engine = SourceSeparationStemPlaybackEngine(
+                    blockFrames = playbackBlockFrameCapacity(engineFactories),
+                    seekResumeBlockFrames = seekResumeBlockFrameCapacity(engineFactories),
+                    seekResumeReadyFrames = seekResumeReadyFrameCapacity(engineFactories),
                     stateChangedSink = { state -> dataPlaneStateChangedSink?.invoke(state) },
+                    failureSink = { error ->
+                        traceDebug(
+                            "engine.failure",
+                            "${error::class.java.simpleName}: ${error.message ?: "unknown"}",
+                        )
+                    },
                 )
                 playbackEngine = engine
                 engineStemBuffers = Array(engineFactories.size) {
@@ -247,9 +297,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             if (playbackEngine == null) seekToLocked(positionMs)
             traceDebug(
                 "enable",
-                "session=$debugSessionId mode=$inputMode positionMs=$positionMs " +
+                        "session=$debugSessionId mode=$inputMode positionMs=$positionMs " +
                         "blend=$blend stemRate=${this.stemSampleRate} stemChannels=${this.stemChannelCount} " +
                         "mixedPrerollMs=${this.mixedOutputReadyPrerollMs} " +
+                        "blockFrames=${playbackEngine?.blockFrameCapacity ?: "none"} " +
+                        "seekResumeBlockFrames=${playbackEngine?.seekResumeBlockFrameCapacity ?: "none"} " +
+                        "seekResumeReadyFrames=${playbackEngine?.seekResumeReadyFrameCapacity ?: "none"} " +
                         "stems=${stemFiles.joinToString { file -> file.name }}"
             )
         }
@@ -260,6 +313,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         stemIds: List<String>,
         stemSampleRate: Int,
         stemChannelCount: Int,
+        stemFrameCount: Long? = null,
+        aacProfiles: List<SourceSeparationAacPlaybackProfile?>? = null,
         frameAvailability: SourceSeparationPlaybackFrameAvailability? = null,
     ): PreparedSourceSeparationPlaybackInputs {
         val normalizedSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
@@ -270,6 +325,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 stemIds = stemIds,
                 sampleRate = normalizedSampleRate,
                 channelCount = normalizedChannelCount,
+                frameCount = stemFrameCount,
+                aacProfiles = aacProfiles,
             ),
         ) { "Separated playback cache uses unsupported stem files." }
         return PreparedSourceSeparationPlaybackInputs(
@@ -277,7 +334,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             stemIds = stemIds,
             stemSampleRate = normalizedSampleRate,
             stemChannelCount = normalizedChannelCount,
+            stemFrameCount = stemFrameCount,
             factories = factories,
+            aacProfiles = aacProfiles ?: List(stemFiles.size) { null },
             frameAvailability = frameAvailability,
         )
     }
@@ -365,6 +424,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 stemIds = stemIds,
                 sampleRate = stemSampleRate,
                 channelCount = stemChannelCount,
+                frameCount = engine.currentSession?.geometry?.frameCount,
+                aacProfiles = null,
             ) ?: return false
             require(factories.size == configuredStemCount) {
                 "Hot-swapped playback must keep the active stem count."
@@ -549,11 +610,21 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             engine.recordAudioThreadTime(System.nanoTime() - audioThreadStartNs)
             val paddedCleanEndOfStream = mixedFrames != frames &&
                     engine.currentState == SourceSeparationPlaybackDataState.Ended
+            val partialFastResume = aacFastResumeActive &&
+                    mixedFrames > 0 &&
+                    mixedFrames < frames &&
+                    inputBuffer.hasRemaining()
             if (paddedCleanEndOfStream) {
                 while (inputBuffer.hasRemaining()) {
                     inputBuffer.get()
                     buffer.put(0)
                 }
+                dataPlaneUnderflowSignaled.set(false)
+            } else if (partialFastResume) {
+                // Media3 may hand us a clock buffer larger than the first
+                // AAC-ready block. Keep the unconsumed input in place so the
+                // next audio-thread call can append the following block,
+                // instead of dropping the clock buffer and ending playback.
                 dataPlaneUnderflowSignaled.set(false)
             } else if (mixedFrames != frames) {
                 // Media3 retries forever if a processor neither consumes input nor
@@ -577,6 +648,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 queueSeq = queueSeq,
                 branch = when {
                     paddedCleanEndOfStream -> "mixed-engine-eof-padded"
+                    partialFastResume -> "mixed-engine-partial"
                     mixedFrames != frames -> "engine-underflow"
                     resampled -> "mixed-engine-resampled"
                     else -> "mixed-engine"
@@ -690,12 +762,34 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val engine = playbackEngine ?: return 0
         var handledFrames = 0
         var mixedFrames = 0
+        val fastResumeWaitDeadlineNs = if (aacFastResumeActive) {
+            System.nanoTime() + AAC_FAST_RESUME_WAIT_NS
+        } else {
+            0L
+        }
+        var waitedForFastResume = false
         while (handledFrames < frameCount) {
             val chunkFrames = minOf(
                 frameCount - handledFrames,
                 engine.blockFrameCapacity,
             )
             val readFrames = engine.readInto(engineStemBuffers, chunkFrames)
+            if (readFrames == 0 &&
+                aacFastResumeActive &&
+                engine.isSeekResumePending() &&
+                engine.currentState != SourceSeparationPlaybackDataState.Ended &&
+                engine.currentState != SourceSeparationPlaybackDataState.Failed &&
+                System.nanoTime() < fastResumeWaitDeadlineNs
+            ) {
+                waitedForFastResume = true
+                try {
+                    Thread.sleep(AAC_FAST_RESUME_WAIT_SLICE_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+                continue
+            }
             if (readFrames > 0) {
                 val readBytes = readFrames * frameSize
                 var stemOffset = 0
@@ -724,6 +818,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             if (readFrames != chunkFrames) {
                 break
             }
+        }
+        if (waitedForFastResume) {
+            traceDebug(
+                "fastResumeWait",
+                "session=$debugSessionId frames=$mixedFrames requested=$frameCount",
+            )
         }
         return mixedFrames
     }
@@ -821,6 +921,13 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     internal fun isDataPlaneReady(): Boolean = playbackEngine?.hasResumeWaterline() ?: active
+
+    /** AAC-only sessions may publish their first mixed PCM block without the normal unmute hold. */
+    internal fun isAacFastResumeActive(): Boolean = aacFastResumeActive
+
+    /** True while an AAC fast-resume seek epoch is still filling its first blocks. */
+    internal fun isAacFastResumePending(): Boolean =
+        aacFastResumeActive && playbackEngine?.isSeekResumePending() == true
 
     internal fun dataPlaneState(): SourceSeparationPlaybackDataState {
         return playbackEngine?.currentState ?: if (active) {
@@ -1134,6 +1241,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     private fun closeLocked() {
         dataPlaneUnderflowSignaled.set(false)
+        aacFastResumeActive = false
         playbackEngine?.close()
         playbackEngine = null
         clearResampleCachesLocked()
@@ -1239,7 +1347,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun traceDebug(event: String, detail: String) {
-        debugTraceSink?.invoke("mix.$event | $detail")
+        emitDebugTrace("mix.$event | $detail")
+    }
+
+    private fun emitDebugTrace(detail: String) {
+        debugTraceSink?.invoke(detail)
+        debugTraceObservers.forEach { observer ->
+            runCatching { observer(detail) }
+        }
     }
 
     private fun openStemInput(file: File): StemPcmInput {
@@ -1258,6 +1373,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         stemIds: List<String>,
         sampleRate: Int,
         channelCount: Int,
+        frameCount: Long?,
+        aacProfiles: List<SourceSeparationAacPlaybackProfile?>? = null,
     ): List<SourceSeparationPlaybackStemSourceFactory>? {
         require(stemFiles.isNotEmpty()) { "Playback requires at least one stem file." }
         require(stemIds.size == stemFiles.size) {
@@ -1274,6 +1391,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 stemId = stemIds[index],
                 sampleRate = sampleRate,
                 channelCount = channelCount,
+                frameCount = frameCount,
+                aacProfile = aacProfiles?.getOrNull(index),
             )
         }
         require(factories.all { factory ->
@@ -1288,38 +1407,121 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         return factories
     }
 
+    private fun playbackBlockFrameCapacity(
+        factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    ): Int {
+        val requested = factories
+            .map(SourceSeparationPlaybackStemSourceFactory::playbackBlockFrameCapacity)
+            .distinct()
+            .singleOrNull()
+        return requested ?: DEFAULT_ENGINE_BLOCK_FRAMES
+    }
+
+    private fun seekResumeBlockFrameCapacity(
+        factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    ): Int? {
+        val requested = factories
+            .map(SourceSeparationPlaybackStemSourceFactory::seekResumeBlockFrameCapacity)
+            .distinct()
+            .singleOrNull()
+        return requested?.takeIf { value -> value > 0 }
+    }
+
+    private fun seekResumeReadyFrameCapacity(
+        factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    ): Int? {
+        val requested = factories
+            .map(SourceSeparationPlaybackStemSourceFactory::seekResumeReadyFrameCapacity)
+            .distinct()
+            .singleOrNull()
+        return requested?.takeIf { value -> value > 0 }
+    }
+
     private fun createEngineFactory(
         file: File,
         stemId: String,
         sampleRate: Int,
         channelCount: Int,
+        frameCount: Long?,
+        aacProfile: SourceSeparationAacPlaybackProfile? = null,
     ): SourceSeparationPlaybackStemSourceFactory {
-        return if (file.extension.equals("flac", ignoreCase = true)) {
-            SourceSeparationFlacStemSourceFactory(
-                file = file,
-                stemId = stemId,
-                traceSink = traceSinkForEngineSource(),
-            )
-        } else {
-            SourceSeparationFileStemSourceFactory(
-                file = file,
-                stemId = stemId,
-                sampleRate = sampleRate,
-                channelCount = channelCount,
-            )
+        return when {
+            file.extension.equals("flac", ignoreCase = true) -> {
+                SourceSeparationFlacStemSourceFactory(
+                    file = file,
+                    stemId = stemId,
+                    traceSink = traceSinkForEngineSource("flac"),
+                )
+            }
+            file.extension.equals("m4a", ignoreCase = true) -> {
+                val wavFallback = File(file.parentFile, "${file.nameWithoutExtension}.wav")
+                    .takeIf(File::isFile)
+                    ?.let { fallbackFile ->
+                        runCatching {
+                            SourceSeparationFileStemSourceFactory(
+                                file = fallbackFile,
+                                stemId = stemId,
+                                sampleRate = sampleRate,
+                                channelCount = channelCount,
+                            )
+                        }.getOrNull()
+                    }
+                val aacFactory = runCatching {
+                    SourceSeparationAacStemSourceFactory(
+                        file = file,
+                        stemId = stemId,
+                        expectedSampleRate = sampleRate,
+                        expectedChannelCount = channelCount,
+                        expectedFrameCount = frameCount,
+                        profile = aacProfile,
+                        traceSink = traceSinkForEngineSource("aac"),
+                    )
+                }
+                aacFactory.fold(
+                    onSuccess = { primary ->
+                        wavFallback?.let { fallback ->
+                            SourceSeparationFallbackStemSourceFactory(
+                                primary = primary,
+                                fallback = fallback,
+                                traceSink = traceSinkForEngineSource("aac"),
+                            )
+                        } ?: primary
+                    },
+                    onFailure = { error ->
+                        requireNotNull(wavFallback) {
+                            "AAC stem cannot be opened and its WAV fallback is missing: " +
+                                    "${error.message}"
+                        }.also {
+                            traceSinkForEngineSource("aac")?.invoke(
+                                "fallback format=wav operation=open reason=" +
+                                        "${error::class.java.simpleName}:" +
+                                        (error.message ?: "unknown"),
+                            )
+                        }
+                    },
+                )
+            }
+            else -> {
+                SourceSeparationFileStemSourceFactory(
+                    file = file,
+                    stemId = stemId,
+                    sampleRate = sampleRate,
+                    channelCount = channelCount,
+                )
+            }
         }
     }
 
     private fun isEngineFile(file: File): Boolean {
         return file.extension.equals("wav", ignoreCase = true) ||
                 file.extension.equals("pcm", ignoreCase = true) ||
-                file.extension.equals("flac", ignoreCase = true)
+                file.extension.equals("flac", ignoreCase = true) ||
+                file.extension.equals("m4a", ignoreCase = true)
     }
 
-    private fun traceSinkForEngineSource(): ((String) -> Unit)? {
-        return debugTraceSink?.let { sink ->
-            { detail -> sink("mix.flac | $detail") }
-        }
+    private fun traceSinkForEngineSource(format: String): ((String) -> Unit)? {
+        if (debugTraceSink == null && debugTraceObservers.isEmpty()) return null
+        return { detail -> emitDebugTrace("mix.$format | $detail") }
     }
 
     companion object {
@@ -1334,6 +1536,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         private const val CHANNEL_RIGHT = 1
         private const val BYTES_PER_SAMPLE = 2
         private const val DEFAULT_SAMPLE_RATE = 44_100
+        private const val DEFAULT_ENGINE_BLOCK_FRAMES = 4_096
+        private const val AAC_FAST_RESUME_WAIT_SLICE_MS = 1L
+        private const val AAC_FAST_RESUME_WAIT_NS = 75_000_000L
         private const val DEFAULT_FRAME_SIZE = CHANNEL_COUNT_STEREO * BYTES_PER_SAMPLE
         private const val RESAMPLE_READ_CHUNK_BYTES = 16 * 1024
         private const val GAIN_RAMP_MILLIS = 5

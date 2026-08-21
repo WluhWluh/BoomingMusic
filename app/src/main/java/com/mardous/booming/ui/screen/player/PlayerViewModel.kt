@@ -53,6 +53,8 @@ import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationStemGainPolicy
+import com.mardous.booming.separation.SourceSeparationCompressionFormat
+import com.mardous.booming.separation.sourceSeparationCompressionFormat
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.toMixModelKey
 import com.mardous.booming.separation.model.contract.SourceSeparationMdxStemLabels
@@ -85,6 +87,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_L
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_COMPRESSION_FORMAT
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_ENABLED
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
@@ -347,6 +350,11 @@ class PlayerViewModel(
         MutableStateFlow(readSourceSeparationAutoFlacCompression())
     val sourceSeparationAutoFlacCompressionFlow =
         _sourceSeparationAutoFlacCompressionFlow.asStateFlow()
+
+    private val _sourceSeparationCompressionFormatFlow =
+        MutableStateFlow(readSourceSeparationCompressionFormat())
+    val sourceSeparationCompressionFormatFlow =
+        _sourceSeparationCompressionFormatFlow.asStateFlow()
 
     private val _sourceSeparationShowSnackbarProgressFlow =
         MutableStateFlow(readSourceSeparationShowSnackbarProgress())
@@ -805,17 +813,27 @@ class PlayerViewModel(
     }
 
     fun seekForward() {
+        traceSourceSeparationPlaybackUserActionMarker(
+            "ui.seekForward monotonicNs=${System.nanoTime()}"
+        )
         mediaController?.seekForward()
     }
 
     fun seekBack() {
+        traceSourceSeparationPlaybackUserActionMarker(
+            "ui.seekBack monotonicNs=${System.nanoTime()}"
+        )
         mediaController?.seekBack()
     }
 
     fun seekTo(positionMillis: Long) {
+        traceSourceSeparationPlaybackUserActionMarker(
+            "ui.seekTo positionMs=$positionMillis monotonicNs=${System.nanoTime()}"
+        )
         _progressFlow.value = positionMillis
         mediaController?.seekTo(positionMillis)
     }
+
 
     fun generateExtraInfo() {
         onGenerateExtraInfo(currentSong)
@@ -995,11 +1013,19 @@ class PlayerViewModel(
     }
 
     fun tryFlacCompressionForCurrentSong() {
+        tryCompressionForCurrentSong()
+    }
+
+    fun tryCompressionForCurrentSong() {
         val song = currentSong
         if (song == Song.emptySong) return
         viewModelScope.launch(IO) {
             resolveSourceSeparationRuntimeSong(song)?.let { runtimeSong ->
-                startSourceSeparationFlacPromotion(song, runtimeSong.cacheKey)
+                startSourceSeparationFlacPromotion(
+                    song = song,
+                    cacheKey = runtimeSong.cacheKey,
+                    format = _sourceSeparationCompressionFormatFlow.value,
+                )
             }
         }
     }
@@ -1024,11 +1050,21 @@ class PlayerViewModel(
         }
     }
 
-    private fun startSourceSeparationFlacPromotion(song: Song, cacheKey: String) {
+    private fun startSourceSeparationFlacPromotion(
+        song: Song,
+        cacheKey: String,
+        format: SourceSeparationCompressionFormat =
+            _sourceSeparationCompressionFormatFlow.value,
+    ) {
+        if (format == SourceSeparationCompressionFormat.None) return
         synchronized(sourceSeparationFlacPromotionLock) {
             if (sourceSeparationFlacPromotionRunningRequest?.cacheKey == cacheKey) return
             sourceSeparationFlacPromotionRequests[cacheKey] =
-                SourceSeparationFlacPromotionRequest(song = song, cacheKey = cacheKey)
+                SourceSeparationFlacPromotionRequest(
+                    song = song,
+                    cacheKey = cacheKey,
+                    format = format,
+                )
             updateSourceSeparationFlacPromotionStateLocked()
             if (sourceSeparationFlacPromotionJob?.isActive != true) {
                 sourceSeparationFlacPromotionJob = createSourceSeparationFlacPromotionWorker()
@@ -1052,7 +1088,8 @@ class PlayerViewModel(
                     }
                     try {
                         traceSourceSeparationPlaybackTestMarker(
-                            "flacPromotion.start songId=${request.song.id} " +
+                            "compressionPromotion.start format=${request.format} " +
+                                    "songId=${request.song.id} " +
                                     "current=${currentSong.id == request.song.id}"
                         )
                         runCatching {
@@ -1062,6 +1099,7 @@ class PlayerViewModel(
                                 sourceSeparationRuntime.promote(
                                     cacheKey = request.cacheKey,
                                     shouldCancel = shouldCancelRequest,
+                                    format = requireNotNull(request.format.cacheFormat()),
                                 )
                             }
                         }.onSuccess { result ->
@@ -1074,7 +1112,8 @@ class PlayerViewModel(
                                 SourceSeparationCacheFlacPromotionResult.Unavailable -> null
                             }
                             traceSourceSeparationPlaybackTestMarker(
-                                "flacPromotion.success songId=${request.song.id} " +
+                                "compressionPromotion.success format=${request.format} " +
+                                        "songId=${request.song.id} " +
                                         "manifest=${manifest != null} current=${currentSong.id == request.song.id} " +
                                         "state=${manifest?.state} cache=${request.cacheKey.take(12)}"
                             )
@@ -1082,33 +1121,42 @@ class PlayerViewModel(
                                 if (currentSong.id == request.song.id) {
                                     refreshCurrentSourceSeparationCacheAvailable(request.song)
                                     traceSourceSeparationPlaybackTestMarker(
-                                        "flacPromotion.playbackUpgrade.deferred songId=${request.song.id}"
+                                        "compressionPromotion.playbackUpgrade.deferred " +
+                                                "format=${request.format} songId=${request.song.id}"
                                     )
                                 } else {
                                     traceSourceSeparationPlaybackTestMarker(
-                                        "flacPromotion.playbackUpgrade.skip songId=${request.song.id} " +
+                                        "compressionPromotion.playbackUpgrade.skip format=${request.format} " +
+                                                "songId=${request.song.id} " +
                                                 "current=${currentSong.id}"
                                     )
                                 }
                                 traceSourceSeparationPlaybackTestMarker(
-                                    "flacPromotion.cleanupTemporaryCache songId=${request.song.id}"
+                                    "compressionPromotion.cleanupTemporaryCache " +
+                                            "format=${request.format} songId=${request.song.id}"
                                 )
                                 requestSourceSeparationTemporaryCacheCleanup()
                             }
                         }.onFailure { error ->
                             traceSourceSeparationPlaybackTestMarker(
-                                "flacPromotion.failed songId=${request.song.id} " +
+                                "compressionPromotion.failed format=${request.format} " +
+                                        "songId=${request.song.id} " +
                                         "error=${error.message ?: error::class.java.name}"
                             )
                             if (error is CancellationException) {
-                                Log.d(TAG, "Source separation FLAC promotion canceled")
+                                Log.d(TAG, "Source separation ${request.format} promotion canceled")
                             } else {
-                                Log.w(TAG, "Failed to promote source separation stems to FLAC", error)
+                                Log.w(
+                                    TAG,
+                                    "Failed to promote source separation stems to ${request.format}",
+                                    error,
+                                )
                             }
                         }
                     } finally {
                         traceSourceSeparationPlaybackTestMarker(
-                            "flacPromotion.finish songId=${request.song.id} " +
+                            "compressionPromotion.finish format=${request.format} " +
+                                    "songId=${request.song.id} " +
                                     "current=${currentSong.id == request.song.id}"
                         )
                         finishSourceSeparationFlacPromotionRequest(request)
@@ -1606,10 +1654,23 @@ class PlayerViewModel(
     }
 
     fun setSourceSeparationAutoFlacCompressionEnabled(enabled: Boolean) {
+        setSourceSeparationCompressionFormat(
+            if (enabled) SourceSeparationCompressionFormat.Flac
+            else SourceSeparationCompressionFormat.None,
+        )
+    }
+
+    fun setSourceSeparationCompressionFormat(format: SourceSeparationCompressionFormat) {
         preferences.edit {
-            putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, enabled)
+            putString(SOURCE_SEPARATION_COMPRESSION_FORMAT, format.preferenceValue())
+            putBoolean(
+                SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                format == SourceSeparationCompressionFormat.Flac,
+            )
         }
-        _sourceSeparationAutoFlacCompressionFlow.value = enabled
+        _sourceSeparationCompressionFormatFlow.value = format
+        _sourceSeparationAutoFlacCompressionFlow.value =
+            format == SourceSeparationCompressionFormat.Flac
     }
 
     fun setSourceSeparationAutoStartEnabled(enabled: Boolean) {
@@ -2038,7 +2099,11 @@ class PlayerViewModel(
     }
 
     private fun readSourceSeparationAutoFlacCompression(): Boolean {
-        return preferences.getBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, true)
+        return readSourceSeparationCompressionFormat() == SourceSeparationCompressionFormat.Flac
+    }
+
+    private fun readSourceSeparationCompressionFormat(): SourceSeparationCompressionFormat {
+        return preferences.sourceSeparationCompressionFormat()
     }
 
     private fun readSourceSeparationShowSnackbarProgress(): Boolean {
@@ -3007,6 +3072,7 @@ private val SourceSeparationPendingAction?.isDeleteCacheAction: Boolean
 private data class SourceSeparationFlacPromotionRequest(
     val song: Song,
     val cacheKey: String,
+    val format: SourceSeparationCompressionFormat,
 )
 
 data class SourceSeparationFlacPromotionUiState(

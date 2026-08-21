@@ -183,10 +183,17 @@ object BackupSettingsPolicy {
     )
 
     val sourceSeparationSettingsV2: List<PortablePreferenceDefinition> =
-        sourceSeparationSettingsV1 + bool(
-            key = "source_separation.gpu_enabled",
-            value = true,
-            introducedInSchema = 2,
+        sourceSeparationSettingsV1 + listOf(
+            bool(
+                key = "source_separation.gpu_enabled",
+                value = true,
+                introducedInSchema = 2,
+            ),
+            string(
+                key = "source_separation.compression_format",
+                value = "flac",
+                introducedInSchema = 2,
+            ),
         )
 
     val nonBackupPreferenceKeys: Set<String> = setOf(
@@ -307,10 +314,15 @@ object BackupSettingsPolicy {
         JsonPrimitive(value),
     )
 
-    private fun string(key: String, value: String) = definition(
+    private fun string(
+        key: String,
+        value: String,
+        introducedInSchema: Int = 1,
+    ) = definition(
         key,
         PortablePreferenceType.String,
         JsonPrimitive(value),
+        introducedInSchema,
     )
 
     @Suppress("unused")

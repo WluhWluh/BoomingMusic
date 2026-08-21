@@ -3,6 +3,7 @@ package com.mardous.booming.playback
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Semaphore
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -13,6 +14,214 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceSeparationStemPlaybackEngineTest {
+    @Test
+    fun engineExposesConfiguredPlaybackBlockCapacityAndFactoriesDefaultToNone() {
+        val geometry = geometry(frameCount = 8)
+        val factory = testFactory("vocals", geometry, pcm(0, 8))
+        assertEquals(null, factory.playbackBlockFrameCapacity)
+
+        val engine = SourceSeparationStemPlaybackEngine(blockFrames = 1_024)
+        try {
+            assertEquals(1_024, engine.blockFrameCapacity)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun seekUsesOneSmallResumeBlockThenReturnsToSteadyBlockSize() {
+        val geometry = geometry(frameCount = 64)
+        val reads = Collections.synchronizedList(mutableListOf<Pair<Long, Int>>())
+        val factory = object : SourceSeparationPlaybackStemSourceFactory {
+            override val spec = SourceSeparationPlaybackStemSpec("vocals", geometry)
+            override val seekResumeBlockFrameCapacity: Int = 2
+
+            override fun open(): SourceSeparationPlaybackStemSource {
+                return object : SourceSeparationPlaybackStemSource {
+                    override val geometry = spec.geometry
+
+                    override fun readFrames(
+                        startFrame: Long,
+                        destination: ByteArray,
+                        destinationOffsetBytes: Int,
+                        frameCount: Int,
+                    ): Int {
+                        reads += startFrame to frameCount
+                        pcm(startFrame.toInt(), frameCount).copyInto(
+                            destination = destination,
+                            destinationOffset = destinationOffsetBytes,
+                        )
+                        return frameCount
+                    }
+
+                    override fun close() = Unit
+                }
+            }
+        }
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 8,
+            seekResumeBlockFrames = 2,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 5,
+            blockCapacity = 6,
+        )
+        try {
+            engine.start(1L, listOf(factory))
+            await { engine.metricsSnapshot().decodeBlockCount >= 1L }
+            reads.clear()
+
+            engine.seekTo(16L)
+            await { reads.any { it.first == 16L && it.second == 2 } }
+            await { reads.any { it.first >= 18L && it.second == 8 } }
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun optInEarlySeekReadyReleasesAfterSmallBlockThenUsesSteadyBlocks() {
+        val geometry = geometry(frameCount = 64)
+        val reads = Collections.synchronizedList(mutableListOf<Pair<Long, Int>>())
+        val factory = object : SourceSeparationPlaybackStemSourceFactory {
+            override val spec = SourceSeparationPlaybackStemSpec("vocals", geometry)
+            override val seekResumeBlockFrameCapacity: Int = 2
+            override val seekResumeReadyFrameCapacity: Int = 2
+
+            override fun open(): SourceSeparationPlaybackStemSource {
+                return object : SourceSeparationPlaybackStemSource {
+                    override val geometry = spec.geometry
+
+                    override fun readFrames(
+                        startFrame: Long,
+                        destination: ByteArray,
+                        destinationOffsetBytes: Int,
+                        frameCount: Int,
+                    ): Int {
+                        reads += startFrame to frameCount
+                        pcm(startFrame.toInt(), frameCount).copyInto(
+                            destination = destination,
+                            destinationOffset = destinationOffsetBytes,
+                        )
+                        return frameCount
+                    }
+
+                    override fun close() = Unit
+                }
+            }
+        }
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 8,
+            seekResumeBlockFrames = 2,
+            seekResumeReadyFrames = 2,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 5,
+            blockCapacity = 6,
+        )
+        try {
+            engine.start(1L, listOf(factory))
+            await { engine.metricsSnapshot().decodeBlockCount >= 1L }
+            reads.clear()
+
+            engine.seekTo(16L)
+            await { reads.any { it.first == 16L && it.second == 2 } }
+            await { engine.hasResumeWaterline() }
+            assertEquals(2, engine.seekResumeReadyFrameCapacity)
+            await { reads.any { it.first >= 18L && it.second == 8 } }
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun earlySeekReadyThresholdMaySpanSeveralSmallBlocks() {
+        val geometry = geometry(frameCount = 64)
+        val firstSmallBlock = CountDownLatch(1)
+        val releaseSecondSmallBlock = CountDownLatch(1)
+        val factory = testFactory(
+            stemId = "vocals",
+            geometry = geometry,
+            pcm = pcm(0, 64),
+            allowPartialSeekReadEnabled = true,
+            beforeRead = { startFrame ->
+                if (startFrame == 18L) {
+                    firstSmallBlock.countDown()
+                    releaseSecondSmallBlock.await()
+                }
+            },
+        )
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 8,
+            seekResumeBlockFrames = 2,
+            seekResumeReadyFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 5,
+            blockCapacity = 6,
+        )
+        try {
+            engine.start(1L, listOf(factory))
+            await { engine.metricsSnapshot().decodeBlockCount >= 1L }
+            engine.seekTo(16L)
+            assertTrue(firstSmallBlock.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertFalse(engine.hasResumeWaterline())
+
+            releaseSecondSmallBlock.countDown()
+            await { engine.hasResumeWaterline() }
+        } finally {
+            releaseSecondSmallBlock.countDown()
+            engine.close()
+        }
+    }
+
+    @Test
+    fun partialAacSeekReadKeepsEarlyReadyStateUntilARealStall() {
+        val geometry = geometry(frameCount = 64)
+        val secondBlockStarted = CountDownLatch(1)
+        val releaseSecondBlock = CountDownLatch(1)
+        val states = Collections.synchronizedList(mutableListOf<SourceSeparationPlaybackDataState>())
+        val factory = testFactory(
+            stemId = "vocals",
+            geometry = geometry,
+            pcm = pcm(0, 64),
+            allowPartialSeekReadEnabled = true,
+            seekResumeBlockFrames = 2,
+            seekResumeReadyFrames = 2,
+            beforeRead = { startFrame ->
+                if (startFrame == 18L) {
+                    secondBlockStarted.countDown()
+                    releaseSecondBlock.await()
+                }
+            },
+        )
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 8,
+            seekResumeBlockFrames = 2,
+            seekResumeReadyFrames = 2,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 5,
+            blockCapacity = 6,
+            stateChangedSink = states::add,
+        )
+        try {
+            engine.start(1L, listOf(factory))
+            await { engine.metricsSnapshot().decodeBlockCount >= 1L }
+            engine.seekTo(16L)
+            await { engine.hasResumeWaterline() && engine.currentState == SourceSeparationPlaybackDataState.Ready }
+            states.clear()
+            assertTrue(secondBlockStarted.await(2, java.util.concurrent.TimeUnit.SECONDS))
+
+            val first = Array(1) { ByteArray(8 * 4) }
+            assertEquals(2, engine.readInto(first, 8))
+            assertEquals(SourceSeparationPlaybackDataState.Ready, engine.currentState)
+            assertFalse(states.contains(SourceSeparationPlaybackDataState.Buffering))
+
+            releaseSecondBlock.countDown()
+            await { engine.metricsSnapshot().decodeBlockCount >= 3L }
+        } finally {
+            releaseSecondBlock.countDown()
+            engine.close()
+        }
+    }
+
     @Test
     fun partialSourceNeverReadsPastThePublishedFrameHorizon() {
         val geometry = geometry(frameCount = 16)
@@ -564,11 +773,17 @@ class SourceSeparationStemPlaybackEngineTest {
         stemId: String,
         geometry: SourceSeparationPlaybackGeometry,
         pcm: ByteArray,
+        allowPartialSeekReadEnabled: Boolean = false,
+        seekResumeBlockFrames: Int? = null,
+        seekResumeReadyFrames: Int? = null,
         beforeRead: (Long) -> Unit = {},
     ): SourceSeparationPlaybackStemSourceFactory {
         val sourceGeometry = geometry
         return object : SourceSeparationPlaybackStemSourceFactory {
             override val spec = SourceSeparationPlaybackStemSpec(stemId, geometry)
+            override val allowPartialSeekRead: Boolean = allowPartialSeekReadEnabled
+            override val seekResumeBlockFrameCapacity: Int? = seekResumeBlockFrames
+            override val seekResumeReadyFrameCapacity: Int? = seekResumeReadyFrames
 
             override fun open(): SourceSeparationPlaybackStemSource {
                 return object : SourceSeparationPlaybackStemSource {

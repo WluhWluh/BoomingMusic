@@ -6,6 +6,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelU
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheAudioFormat
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
@@ -106,6 +107,12 @@ interface SourceSeparationRuntimeFacade {
         cacheKey: String,
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationCacheFlacPromotionResult
+
+    fun promote(
+        cacheKey: String,
+        shouldCancel: () -> Boolean = { false },
+        format: SourceSeparationCacheAudioFormat,
+    ): SourceSeparationCacheFlacPromotionResult = promote(cacheKey, shouldCancel)
 
     fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean
 
@@ -361,7 +368,20 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     override fun promote(
         cacheKey: String,
         shouldCancel: () -> Boolean,
-    ): SourceSeparationCacheFlacPromotionResult = flacPromoter.promote(cacheKey, shouldCancel)
+    ): SourceSeparationCacheFlacPromotionResult = flacPromoter.promote(
+        cacheKey = cacheKey,
+        shouldCancel = shouldCancel,
+    )
+
+    override fun promote(
+        cacheKey: String,
+        shouldCancel: () -> Boolean,
+        format: SourceSeparationCacheAudioFormat,
+    ): SourceSeparationCacheFlacPromotionResult = flacPromoter.promote(
+        cacheKey = cacheKey,
+        shouldCancel = shouldCancel,
+        format = format,
+    )
 
     override fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean =
         runCoordinator.cleanCompletedTemporaryFiles(cacheKey)

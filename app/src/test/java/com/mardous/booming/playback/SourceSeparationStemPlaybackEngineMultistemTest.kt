@@ -102,6 +102,80 @@ class SourceSeparationStemPlaybackEngineMultistemTest {
     }
 
     @Test
+    fun fastSeekReadsOnlyTheFirstBlockWithBoundedParallelism() {
+        val stemCount = 6
+        val geometry = geometry(32)
+        val entered = java.util.concurrent.CountDownLatch(3)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val activeReads = AtomicInteger()
+        val maxActiveReads = AtomicInteger()
+        val factories = (0 until stemCount).map { stemIndex ->
+            val sourcePcm = pcm(stemIndex * 1_000, geometry.frameCount.toInt())
+            object : SourceSeparationPlaybackStemSourceFactory {
+                override val spec = SourceSeparationPlaybackStemSpec("stem-$stemIndex", geometry)
+                override val fastSeekParallelism: Int = 3
+
+                override fun open(): SourceSeparationPlaybackStemSource {
+                    return object : SourceSeparationPlaybackStemSource {
+                        override val geometry = spec.geometry
+
+                        override fun seekToFrame(frame: Long) {
+                            // The fixture has random-access PCM.
+                        }
+
+                        override fun readFrames(
+                            startFrame: Long,
+                            destination: ByteArray,
+                            destinationOffsetBytes: Int,
+                            frameCount: Int,
+                        ): Int {
+                            if (startFrame == 8L) {
+                                val active = activeReads.incrementAndGet()
+                                maxActiveReads.updateAndGet { current -> maxOf(current, active) }
+                                entered.countDown()
+                                release.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                                activeReads.decrementAndGet()
+                            }
+                            val sourceOffset = startFrame.toInt() * BYTES_PER_FRAME
+                            sourcePcm.copyInto(
+                                destination = destination,
+                                destinationOffset = destinationOffsetBytes,
+                                startIndex = sourceOffset,
+                                endIndex = sourceOffset + frameCount * BYTES_PER_FRAME,
+                            )
+                            return frameCount
+                        }
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+        }
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 2,
+            blockCapacity = 3,
+        )
+        try {
+            engine.start(sessionId = 1L, factories = factories)
+            await { engine.hasResumeWaterline() }
+            engine.seekTo(8L)
+            assertTrue(
+                "Expected three AAC-capable source reads to overlap",
+                entered.await(2, java.util.concurrent.TimeUnit.SECONDS),
+            )
+            release.countDown()
+            await { engine.hasResumeWaterline() }
+            assertEquals(3, maxActiveReads.get())
+            assertCurrentBlock(engine, stemCount, expectedStart = 8, base = 0)
+        } finally {
+            release.countDown()
+            engine.close()
+        }
+    }
+
+    @Test
     fun oneShortStemFailsTheCompleteEightStemSession() {
         val stemCount = 8
         val frameCount = 16

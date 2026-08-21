@@ -70,6 +70,7 @@ class BackupContractV1Test {
             "source_separation.auto_cache_cleanup_partial_limit",
             "source_separation.auto_cache_cleanup_completed_limit",
             "source_separation.gpu_enabled",
+            "source_separation.compression_format",
         )
 
         assertEquals(expected, BackupSettingsPolicy.sourceSeparationSettingsByKey.keys)
@@ -82,6 +83,12 @@ class BackupContractV1Test {
             2,
             BackupSettingsPolicy.sourceSeparationSettingsByKey
                 .getValue("source_separation.gpu_enabled")
+                .introducedInSchema,
+        )
+        assertEquals(
+            2,
+            BackupSettingsPolicy.sourceSeparationSettingsByKey
+                .getValue("source_separation.compression_format")
                 .introducedInSchema,
         )
         assertFalse(

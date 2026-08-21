@@ -29,6 +29,7 @@ import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.audio.Pcm16WavFileReader
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheAudioFormat
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
@@ -59,11 +60,13 @@ import com.mardous.booming.util.BLACKLIST_ENABLED
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.SOURCE_SEPARATION_COMPRESSION_FORMAT
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.WHITELIST_ENABLED
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -83,6 +86,11 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.koin.core.context.GlobalContext
+
+private val AAC_ANCHOR_TRACE_PATTERN = Regex(
+    "requestedFrame=(-?\\d+)\\s+anchorFrame=(-?\\d+)\\s+offsetFrames=(-?\\d+)",
+)
+private val MIXED_OUTPUT_READY_GENERATION_PATTERN = Regex("generation=(\\d+)")
 
 @RunWith(AndroidJUnit4::class)
 class SourceSeparationMultiStemProductExecutionDeviceTest {
@@ -332,6 +340,25 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val deleteActiveCache = arguments.getString(ARG_DELETE_ACTIVE_CACHE)
             ?.toBooleanStrictOrNull()
             ?: false
+        val compressionFormat = when (
+            arguments.getString(ARG_COMPRESSION_FORMAT)
+                ?.lowercase()
+                ?.takeIf(String::isNotBlank)
+                ?: SourceSeparationCompressionFormat.PREFERENCE_FLAC
+        ) {
+            SourceSeparationCompressionFormat.PREFERENCE_FLAC ->
+                SourceSeparationCompressionFormat.Flac
+            SourceSeparationCompressionFormat.PREFERENCE_AAC ->
+                SourceSeparationCompressionFormat.AacLcM4a
+            else -> error(
+                "$ARG_COMPRESSION_FORMAT must be flac or aac_lc_160k.",
+            )
+        }
+        val promotedFormat = requireNotNull(compressionFormat.cacheFormat())
+        val extraSeekCount = arguments.getString(ARG_EXTRA_SEEK_COUNT)
+            ?.toIntOrNull()
+            ?.also { require(it in 0..MAX_EXTRA_SEEK_COUNT) }
+            ?: 0
         val koin = GlobalContext.get()
         val facade = koin.get<SourceSeparationMultiStemProductFacade>()
         val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
@@ -349,6 +376,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 IGNORE_AUDIO_FOCUS,
                 WHITELIST_ENABLED,
                 BLACKLIST_ENABLED,
+                SOURCE_SEPARATION_COMPRESSION_FORMAT,
             ),
         )
         val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
@@ -361,9 +389,21 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
             .put("abi", currentProcessAbi())
+            .put("compressionFormat", compressionFormat.preferenceValue())
+            .put("extraSeekCount", extraSeekCount)
         var mediaUri: Uri? = null
         var cacheKey: String? = null
         var controller: MediaController? = null
+        val sourceTraces = CopyOnWriteArrayList<String>()
+        val traceEvents = CopyOnWriteArrayList<SourceTraceSample>()
+        val traceObserver = processor.addDebugTraceObserver { trace ->
+            sourceTraces += trace
+            traceEvents += SourceTraceSample(
+                timestampNs = System.nanoTime(),
+                text = trace,
+            )
+        }
+        val seekSummaries = mutableListOf<AacSeekSummary>()
         try {
             check(preferences.edit()
                 .putInt(MINIMUM_SONG_DURATION, 0)
@@ -371,6 +411,10 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .putBoolean(IGNORE_AUDIO_FOCUS, true)
                 .putBoolean(WHITELIST_ENABLED, false)
                 .putBoolean(BLACKLIST_ENABLED, false)
+                .putString(
+                    SOURCE_SEPARATION_COMPRESSION_FORMAT,
+                    compressionFormat.preferenceValue(),
+                )
                 .commit())
             mediaUri = importIntoMediaStore(context, source, runId)
             val song = stagedSong(mediaUri, source, runId)
@@ -396,18 +440,48 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 is HtdemucsSourceSeparationEngineResult.Busy -> error("Unexpected busy result")
             }
             cacheKey = manifest.cacheKey
-            val promoted = promoter.promote(manifest.cacheKey)
+            val promotionStartedAtMs = SystemClock.elapsedRealtime()
+            val promoted = promoter.promote(
+                cacheKey = manifest.cacheKey,
+                format = promotedFormat,
+            )
+            val promotionElapsedMs = SystemClock.elapsedRealtime() - promotionStartedAtMs
             val playbackManifest = when (promoted) {
                 is SourceSeparationCacheFlacPromotionResult.Completed -> promoted.manifest
                 is SourceSeparationCacheFlacPromotionResult.AlreadyPromoted -> promoted.manifest
                 is SourceSeparationCacheFlacPromotionResult.Busy -> error("Unexpected promotion contention")
                 SourceSeparationCacheFlacPromotionResult.Unavailable ->
-                    error("FLAC promotion was unavailable")
+                    error("${compressionFormat.name} promotion was unavailable")
             }
             val output = requireNotNull(playbackManifest.output)
+            assertTrue(output.stems.all { stem ->
+                stem.promotionValidated && stem.resolvedPromotedFormat() == promotedFormat
+            })
+            assertEquals(1, output.stems.map { stem -> stem.resolvedPromotedFormat() }.distinct().size)
+            if (promotedFormat == SourceSeparationCacheAudioFormat.AacLcM4a) {
+                output.stems.forEach { stem ->
+                    assertTrue(stem.promotedPath?.endsWith(".m4a") == true)
+                    assertNull(stem.promotedIndexPath)
+                    assertEquals("audio/mp4a-latm", stem.promotedMimeType)
+                    assertTrue((stem.promotedBitRate ?: 0) > 0)
+                    assertTrue((stem.promotedDecodedFrameCount ?: 0L) > 0L)
+                    assertTrue(store.resolveEntryPath(playbackManifest.cacheKey, stem.wavPath).isFile)
+                    assertTrue(store.resolveEntryPath(
+                        playbackManifest.cacheKey,
+                        requireNotNull(stem.promotedPath),
+                    ).isFile)
+                }
+            }
+            report.put("promotionElapsedMs", promotionElapsedMs)
+                .put("promotedFormat", promotedFormat.name)
+                .put("promotedPaths", JSONArray(output.stems.map { it.promotedPath }))
+                .put("wavFallbackRetained", output.stems.all { stem ->
+                    store.resolveEntryPath(playbackManifest.cacheKey, stem.wavPath).isFile
+                })
+                .put("cacheBytesAfterPromotion", store.entrySize(playbackManifest.cacheKey))
             val expectedStemIds = output.stems.sortedBy { stem -> stem.order }
                 .map { stem -> stem.stemId.value }
-            assertTrue(expectedStemIds.size == 4 || expectedStemIds.size == 6)
+            assertEquals(6, expectedStemIds.size)
             selectionStore.select(modelId)
 
             val mediaController = MediaController.Builder(
@@ -504,10 +578,27 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                     syncResult.extras.getString(Playback.EXTRA_SOURCE_SEPARATION_MESSAGE).orEmpty()
             }
             waitForMediaController(mediaController, "multi-stem playback adoption") {
-                mediaController.playWhenReady &&
+                    mediaController.playWhenReady &&
                     mediaController.playbackState == Player.STATE_READY &&
-                    processor.dataPlaneStemIds() == expectedStemIds
+                    processor.dataPlaneStemIds() == expectedStemIds &&
+                    processor.isDataPlaneReady() &&
+                    (promotedFormat != SourceSeparationCacheAudioFormat.AacLcM4a ||
+                        sourceTraces.count { trace ->
+                            trace.contains("mix.aac | open codec=")
+                        } >= expectedStemIds.size)
             }
+            val initialAacOpenTraceCount = if (
+                promotedFormat == SourceSeparationCacheAudioFormat.AacLcM4a
+            ) {
+                sourceTraces.count { trace -> trace.contains("mix.aac | open codec=") }
+                    .also { count -> assertTrue(count >= expectedStemIds.size) }
+            } else {
+                0
+            }
+            assertTrue(sourceTraces.none { trace -> trace.contains("fallback format=wav") })
+            val baselinePssKb = Debug.getPss()
+            var peakPssKb = baselinePssKb
+            val thermalStatuses = mutableListOf(thermalStatus(context))
             val metricsBeforeSeek = requireNotNull(processor.dataPlaneMetrics())
             assertEquals(expectedStemIds.size, metricsBeforeSeek.activeStemCount)
 
@@ -569,19 +660,117 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             val seekPositionMs = onMediaControllerThread(mediaController) {
                 (mediaController.duration / 3L).coerceAtLeast(1_000L)
             }
+            val dataPlaneReadyLatenciesMs = mutableListOf<Long>()
+            val firstMixedPcmLatenciesMs = mutableListOf<Long>()
+            val initialSeekTraceStartIndex = traceEvents.size
+            val initialSeekStartedAtNs = System.nanoTime()
+            val initialSeekRequestsBefore = metricsBeforeSeek.seekRequests
             onMediaControllerThread(mediaController) { mediaController.seekTo(seekPositionMs) }
-            waitForMediaController(mediaController, "seek") {
-                kotlin.math.abs(mediaController.currentPosition - seekPositionMs) <=
-                    MEDIA_SESSION_SEEK_TOLERANCE_MS
-            }
             onMediaControllerThread(mediaController) { mediaController.play() }
-            waitForMediaController(mediaController, "resume after seek") {
-                mediaController.playWhenReady &&
+            waitForMediaController(mediaController, "resume after seek data plane") {
+                kotlin.math.abs(mediaController.currentPosition - seekPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS &&
+                    mediaController.playWhenReady &&
                     mediaController.playbackState == Player.STATE_READY &&
-                    processor.dataPlaneStemIds() == expectedStemIds
+                    processor.dataPlaneStemIds() == expectedStemIds &&
+                    processor.isDataPlaneReady() &&
+                    (processor.dataPlaneMetrics()?.seekRequests ?: 0L) >
+                        initialSeekRequestsBefore
+            }
+            val initialSeekToDataPlaneReadyMs = elapsedMillisSince(initialSeekStartedAtNs)
+            waitForMediaController(mediaController, "resume after seek mixed PCM") {
+                kotlin.math.abs(mediaController.currentPosition - seekPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS &&
+                    mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds &&
+                    firstMixedOutputReadyAfter(traceEvents, initialSeekTraceStartIndex) != null
+            }
+            val initialMixedOutput = requireNotNull(
+                firstMixedOutputReadyAfter(traceEvents, initialSeekTraceStartIndex),
+            )
+            val initialSeekToFirstMixedPcmMs = elapsedMillisSince(
+                initialSeekStartedAtNs,
+                initialMixedOutput.timestampNs,
+            )
+            val initialAnchors = collectAacAnchors(
+                traceEvents = traceEvents,
+                startIndex = initialSeekTraceStartIndex,
+                expectedStemCount = expectedStemIds.size,
+                requireComplete = promotedFormat == SourceSeparationCacheAudioFormat.AacLcM4a,
+            )
+            seekSummaries += AacSeekSummary(
+                seekIndex = 0,
+                targetPositionMs = seekPositionMs,
+                dataPlaneReadyMs = initialSeekToDataPlaneReadyMs,
+                firstMixedPcmMs = initialSeekToFirstMixedPcmMs,
+                mixedOutputGeneration = mixedOutputGeneration(initialMixedOutput),
+                anchors = initialAnchors,
+            )
+            dataPlaneReadyLatenciesMs += initialSeekToDataPlaneReadyMs
+            firstMixedPcmLatenciesMs += initialSeekToFirstMixedPcmMs
+            val metricsAfterInitialSeek = requireNotNull(processor.dataPlaneMetrics())
+            assertTrue(metricsAfterInitialSeek.seekRequests > metricsBeforeSeek.seekRequests)
+            val durationMs = onMediaControllerThread(mediaController) {
+                mediaController.duration.coerceAtLeast(0L)
+            }
+            repeat(extraSeekCount) { index ->
+                val seekSpanMs = (durationMs - 2_000L).coerceAtLeast(1L)
+                val targetMs = if (durationMs <= 2_000L) {
+                    (durationMs / 2L).coerceAtLeast(0L)
+                } else {
+                    1_000L + ((index.toLong() * 7_919L + 1_337L) % seekSpanMs)
+                }
+                val seekRequestsBefore = requireNotNull(processor.dataPlaneMetrics()).seekRequests
+                val seekTraceStartIndex = traceEvents.size
+                val seekStartedAtNs = System.nanoTime()
+                onMediaControllerThread(mediaController) { mediaController.seekTo(targetMs) }
+                waitForMediaController(mediaController, "extra seek ${index + 1} data plane") {
+                    kotlin.math.abs(mediaController.currentPosition - targetMs) <=
+                        MEDIA_SESSION_SEEK_TOLERANCE_MS &&
+                        mediaController.playWhenReady &&
+                        mediaController.playbackState == Player.STATE_READY &&
+                        processor.dataPlaneStemIds() == expectedStemIds &&
+                        processor.isDataPlaneReady() &&
+                        (processor.dataPlaneMetrics()?.seekRequests ?: 0L) > seekRequestsBefore
+                }
+                val dataPlaneReadyMs = elapsedMillisSince(seekStartedAtNs)
+                waitForMediaController(mediaController, "extra seek ${index + 1} mixed PCM") {
+                    kotlin.math.abs(mediaController.currentPosition - targetMs) <=
+                        MEDIA_SESSION_SEEK_TOLERANCE_MS &&
+                        mediaController.playWhenReady &&
+                        mediaController.playbackState == Player.STATE_READY &&
+                        processor.dataPlaneStemIds() == expectedStemIds &&
+                        firstMixedOutputReadyAfter(traceEvents, seekTraceStartIndex) != null
+                }
+                val mixedOutput = requireNotNull(
+                    firstMixedOutputReadyAfter(traceEvents, seekTraceStartIndex),
+                )
+                val firstMixedPcmMs = elapsedMillisSince(seekStartedAtNs, mixedOutput.timestampNs)
+                val anchors = collectAacAnchors(
+                    traceEvents = traceEvents,
+                    startIndex = seekTraceStartIndex,
+                    expectedStemCount = expectedStemIds.size,
+                    requireComplete = promotedFormat == SourceSeparationCacheAudioFormat.AacLcM4a,
+                )
+                seekSummaries += AacSeekSummary(
+                    seekIndex = index + 1,
+                    targetPositionMs = targetMs,
+                    dataPlaneReadyMs = dataPlaneReadyMs,
+                    firstMixedPcmMs = firstMixedPcmMs,
+                    mixedOutputGeneration = mixedOutputGeneration(mixedOutput),
+                    anchors = anchors,
+                )
+                dataPlaneReadyLatenciesMs += dataPlaneReadyMs
+                firstMixedPcmLatenciesMs += firstMixedPcmMs
+                peakPssKb = maxOf(peakPssKb, Debug.getPss())
+                thermalStatuses += thermalStatus(context)
             }
             val metricsAfterSeek = requireNotNull(processor.dataPlaneMetrics())
-            assertTrue(metricsAfterSeek.seekRequests > metricsBeforeSeek.seekRequests)
+            assertTrue(
+                metricsAfterSeek.seekRequests >=
+                    metricsBeforeSeek.seekRequests + 1L + extraSeekCount,
+            )
             val seekUnderruns = metricsAfterSeek.underruns - metricsBeforeSeek.underruns
             assertTrue(
                 "Seek added $seekUnderruns underruns; allowed=$allowedSeekUnderruns",
@@ -625,10 +814,29 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             check(recreatedEnable.resultCode == SessionResult.RESULT_SUCCESS)
             onMediaControllerThread(recreatedController) { recreatedController.play() }
             waitForMediaController(recreatedController, "recreated multi-stem adoption") {
-                recreatedController.playWhenReady &&
+                    recreatedController.playWhenReady &&
                     recreatedController.playbackState == Player.STATE_READY &&
-                    processor.dataPlaneStemIds() == expectedStemIds
+                    processor.dataPlaneStemIds() == expectedStemIds &&
+                    processor.isDataPlaneReady() &&
+                    (promotedFormat != SourceSeparationCacheAudioFormat.AacLcM4a ||
+                        sourceTraces.count { trace ->
+                            trace.contains("mix.aac | open codec=")
+                        } >= initialAacOpenTraceCount + expectedStemIds.size)
             }
+            val totalAacOpenTraceCount = if (
+                promotedFormat == SourceSeparationCacheAudioFormat.AacLcM4a
+            ) {
+                sourceTraces.count { trace -> trace.contains("mix.aac | open codec=") }
+                    .also { count ->
+                        assertTrue(count >= initialAacOpenTraceCount + expectedStemIds.size)
+                    }
+            } else {
+                0
+            }
+            val wavFallbackTraceCount = sourceTraces.count { trace ->
+                trace.contains("fallback format=wav")
+            }
+            assertEquals(0, wavFallbackTraceCount)
 
             report.put("status", "complete")
                 .put("cacheKey", manifest.cacheKey)
@@ -640,6 +848,25 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("underruns", metricsAfterSeek.underruns)
                 .put("seekUnderruns", seekUnderruns)
                 .put("allowedSeekUnderruns", allowedSeekUnderruns)
+                .put("initialSeekToDataPlaneReadyMs", initialSeekToDataPlaneReadyMs)
+                .put("initialSeekToFirstMixedPcmMs", initialSeekToFirstMixedPcmMs)
+                // Kept as compatibility aliases for earlier reports.
+                .put("initialSeekToMixedPcmMs", initialSeekToFirstMixedPcmMs)
+                .put("extraSeekToDataPlaneReadyLatency",
+                    windowTimingJson(dataPlaneReadyLatenciesMs.drop(1)))
+                .put("extraSeekToFirstMixedPcmLatency",
+                    windowTimingJson(firstMixedPcmLatenciesMs.drop(1)))
+                .put("extraSeekLatency", windowTimingJson(dataPlaneReadyLatenciesMs.drop(1)))
+                .put("seekSummaries", JSONArray(seekSummaries.map(AacSeekSummary::toJson)))
+                .put("baselinePssKb", baselinePssKb)
+                .put("peakPssKb", peakPssKb)
+                .put("pssDeltaKb", (peakPssKb - baselinePssKb).coerceAtLeast(0))
+                .put("openFileDescriptors", metricsAfterSeek.openFileDescriptors)
+                .put("bufferPoolBytes", metricsAfterSeek.bufferPoolBytes)
+                .put("thermalStatuses", JSONArray(thermalStatuses))
+                .put("aacOpenTraceCount", totalAacOpenTraceCount)
+                .put("wavFallbackTraceCount", wavFallbackTraceCount)
+                .put("sourceTraceExcerpt", JSONArray(sourceTraces.take(60)))
                 .put("serviceRecreated", true)
                 .put("transportMediaId", song.id)
                 .put("transportUri", song.uri)
@@ -661,9 +888,27 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 })
             }
             report.put("processorStemIds", processor.dataPlaneStemIds())
+                .put("dataPlaneState", processor.dataPlaneState().name)
+                .put("dataPlaneReady", processor.isDataPlaneReady())
+                .put("dataPlaneUnavailableFrame", processor.dataPlaneUnavailableFrame())
+                .put("dataPlaneMetrics", processor.dataPlaneMetrics()?.let { metrics ->
+                    JSONObject()
+                        .put("decodeBlockCount", metrics.decodeBlockCount)
+                        .put("decodeP95Ns", metrics.decodeBlockLatencyNs.p95)
+                        .put("seekRequests", metrics.seekRequests)
+                        .put("seekReady", metrics.seekReady)
+                        .put("underruns", metrics.underruns)
+                        .put("lowWaterEvents", metrics.lowWaterEvents)
+                        .put("openFileDescriptors", metrics.openFileDescriptors)
+                })
+                .put("sourceTraceCount", sourceTraces.size)
+                .put("seekSummaries", JSONArray(seekSummaries.map(AacSeekSummary::toJson)))
+                .put("sourceTraceExcerpt", JSONArray(sourceTraces.takeLast(120)))
             reportFile.writeText(report.toString(2))
             throw error
         } finally {
+            processor.debugTraceSink = null
+            traceObserver.close()
             controller?.let { mediaController ->
                 runCatching {
                     onMediaControllerThread(mediaController) {
@@ -3146,10 +3391,116 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 null -> editor.remove(key)
                 is Boolean -> editor.putBoolean(key, value)
                 is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is String -> editor.putString(key, value)
                 else -> error("Unsupported test preference value for $key")
             }
         }
         check(editor.commit())
+    }
+
+    private data class SourceTraceSample(
+        val timestampNs: Long,
+        val text: String,
+    )
+
+    private data class AacAnchorObservation(
+        val requestedFrame: Long,
+        val anchorFrame: Long,
+        val offsetFrames: Long,
+        val timestampNs: Long,
+    )
+
+    private data class AacSeekSummary(
+        val seekIndex: Int,
+        val targetPositionMs: Long,
+        val dataPlaneReadyMs: Long,
+        val firstMixedPcmMs: Long,
+        val mixedOutputGeneration: Long?,
+        val anchors: List<AacAnchorObservation>,
+    ) {
+        fun toJson(): JSONObject {
+            val offsets = anchors.map { anchor -> anchor.offsetFrames }
+            val anchorFrames = anchors.map { anchor -> anchor.anchorFrame }
+            val requestedFrames = anchors.map { anchor -> anchor.requestedFrame }
+            return JSONObject()
+                .put("seekIndex", seekIndex)
+                .put("targetPositionMs", targetPositionMs)
+                .put("dataPlaneReadyMs", dataPlaneReadyMs)
+                .put("firstMixedPcmMs", firstMixedPcmMs)
+                .put("mixedOutputGeneration", mixedOutputGeneration ?: JSONObject.NULL)
+                .put("anchorCount", anchors.size)
+                .put("requestedFrames", JSONArray(requestedFrames))
+                .put("anchorFrames", JSONArray(anchorFrames))
+                .put("anchorOffsetsFrames", JSONArray(offsets))
+                .put("anchorOffsetMinFrames", offsets.minOrNull() ?: JSONObject.NULL)
+                .put("anchorOffsetMaxFrames", offsets.maxOrNull() ?: JSONObject.NULL)
+                .put(
+                    "anchorOffsetSpreadFrames",
+                    if (offsets.isEmpty()) JSONObject.NULL
+                    else offsets.maxOrNull()!! - offsets.minOrNull()!!,
+                )
+        }
+    }
+
+    private fun elapsedMillisSince(
+        startedAtNs: Long,
+        eventAtNs: Long = System.nanoTime(),
+    ): Long = ((eventAtNs - startedAtNs).coerceAtLeast(0L)) / 1_000_000L
+
+    private fun firstMixedOutputReadyAfter(
+        traceEvents: List<SourceTraceSample>,
+        startIndex: Int,
+    ): SourceTraceSample? = traceEvents.asSequence()
+        .drop(startIndex.coerceIn(0, traceEvents.size))
+        .firstOrNull { sample -> sample.text.contains("mix.mixedOutputPreroll.ready") }
+
+    private fun mixedOutputGeneration(sample: SourceTraceSample): Long? =
+        MIXED_OUTPUT_READY_GENERATION_PATTERN.find(sample.text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toLongOrNull()
+
+    private fun collectAacAnchors(
+        traceEvents: List<SourceTraceSample>,
+        startIndex: Int,
+        expectedStemCount: Int,
+        requireComplete: Boolean,
+    ): List<AacAnchorObservation> {
+        if (!requireComplete) return emptyList()
+        val observations = traceEvents.asSequence()
+            .drop(startIndex.coerceIn(0, traceEvents.size))
+            .mapNotNull(::parseAacAnchor)
+            .toList()
+        val groups = observations.groupBy(AacAnchorObservation::requestedFrame).values
+        var selected = emptyList<AacAnchorObservation>()
+        var selectedDistance = Long.MAX_VALUE
+        groups.forEach { group ->
+            val distance = group.firstOrNull()?.requestedFrame ?: Long.MAX_VALUE
+            if (group.size > selected.size ||
+                (group.size == selected.size && distance < selectedDistance)
+            ) {
+                selected = group
+                selectedDistance = distance
+            }
+        }
+        assertTrue(
+            "AAC seek emitted ${selected.size} anchor traces; expected at least " +
+                "$expectedStemCount. Observed=${observations.size}",
+            selected.size >= expectedStemCount,
+        )
+        return selected
+    }
+
+    private fun parseAacAnchor(sample: SourceTraceSample): AacAnchorObservation? {
+        if (!sample.text.contains("mix.aac | seek ")) return null
+        val match = AAC_ANCHOR_TRACE_PATTERN.find(sample.text) ?: return null
+        return AacAnchorObservation(
+            requestedFrame = match.groupValues[1].toLong(),
+            anchorFrame = match.groupValues[2].toLong(),
+            offsetFrames = match.groupValues[3].toLong(),
+            timestampNs = sample.timestampNs,
+        )
     }
 
     private fun SourceSeparationModelAwarePlayableStatus.closePlaybackForTest() {
@@ -3535,6 +3886,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val ARG_RUN_ID = "bssMultistemRunId"
         const val ARG_ALLOWED_SEEK_UNDERRUNS = "bssMultistemAllowedSeekUnderruns"
         const val ARG_DELETE_ACTIVE_CACHE = "bssMultistemDeleteActiveCache"
+        const val ARG_COMPRESSION_FORMAT = "bssMultistemCompressionFormat"
+        const val ARG_EXTRA_SEEK_COUNT = "bssMultistemExtraSeekCount"
         const val ARG_APP_COMMIT = "bssAppCommit"
         const val ARG_TEST_COMMIT = "bssTestCommit"
         const val ARG_CONTROLLED_TERMINATION_GRACE_MS =
@@ -3549,6 +3902,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val MEDIA_SESSION_POLL_INTERVAL_MS = 50L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 750L
         const val SERVICE_RECREATION_SETTLE_MS = 500L
+        const val MAX_EXTRA_SEEK_COUNT = 100
         const val PRODUCER_AHEAD_READY_WINDOWS = 2
         const val PRODUCER_AHEAD_READY_TIMEOUT_MS = 10L * 60L * 1_000L
         const val REMOTE_PROCESS_TIMEOUT_MS = 30_000L

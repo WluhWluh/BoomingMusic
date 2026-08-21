@@ -2,8 +2,14 @@ package com.mardous.booming.playback.processor
 
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
+import com.mardous.booming.playback.SourceSeparationAacPlaybackProfile
+import com.mardous.booming.playback.SourceSeparationFileStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationPlaybackDataState
 import com.mardous.booming.playback.SourceSeparationPlaybackFrameAvailability
+import com.mardous.booming.playback.SourceSeparationPlaybackGeometry
+import com.mardous.booming.playback.SourceSeparationPlaybackStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationPlaybackStemSource
+import com.mardous.booming.playback.SourceSeparationPlaybackStemSpec
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import java.io.File
 import java.io.RandomAccessFile
@@ -180,6 +186,124 @@ class SourceSeparationMixAudioProcessorTest {
             assertEquals(listOf(flushes.last().second), mixedOutputGenerations)
         } finally {
             processor.disable()
+        }
+    }
+
+    @Test
+    fun completeAacPreparedSessionPublishesMixedOutputWithoutPreroll() {
+        val stems = listOf(
+            writeWav("aac-fast-vocals.wav", 16_384, 1_000),
+            writeWav("aac-fast-instrumental.wav", 16_384, 2_000),
+        )
+        val delegates = stems.mapIndexed { index, file ->
+            SourceSeparationFileStemSourceFactory(
+                file = file,
+                stemId = MDX_STEM_IDS[index],
+                sampleRate = 44_100,
+                channelCount = 2,
+            )
+        }
+        val fastFactories = delegates.map { delegate ->
+            object : SourceSeparationPlaybackStemSourceFactory {
+                override val spec = delegate.spec
+                override val fastSeekParallelism: Int = 6
+
+                override fun open() = delegate.open()
+            }
+        }
+        val prepared = PreparedSourceSeparationPlaybackInputs(
+            stemFiles = stems,
+            stemIds = MDX_STEM_IDS,
+            stemSampleRate = 44_100,
+            stemChannelCount = 2,
+            stemFrameCount = 16_384L,
+            factories = fastFactories,
+            aacProfiles = List(stems.size) { SourceSeparationAacPlaybackProfile() },
+        )
+        val processor = SourceSeparationMixAudioProcessor()
+        val mixedOutputGenerations = CopyOnWriteArrayList<Long>()
+        processor.mixedOutputStartedSink = { generation -> mixedOutputGenerations += generation }
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
+                positionMs = 0L,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 400L,
+                preparedInputs = prepared,
+            )
+            await { processor.isDataPlaneReady() }
+            processor.queueInput(silentInput(1))
+            processor.output
+            assertEquals(1, mixedOutputGenerations.size)
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun agreedFactoryBlockCapacitySelectsEngineOtherwiseDefaultRemains4096() {
+        data class Case(
+            val capacities: List<Int?>,
+            val expectedFirstReadFrames: Int,
+        )
+        listOf(
+            Case(listOf(1_024, 1_024), 1_024),
+            Case(listOf(1_024, null), 4_096),
+            Case(listOf(null, null), 4_096),
+        ).forEachIndexed { caseIndex, testCase ->
+            val frameCount = 32_768
+            val stems = listOf(
+                writeWav("block-capacity-$caseIndex-vocals.wav", frameCount, 0),
+                writeWav("block-capacity-$caseIndex-instrumental.wav", frameCount, 0),
+            )
+            val readSizes = CopyOnWriteArrayList<Int>()
+            val geometry = SourceSeparationPlaybackGeometry(
+                sampleRate = 44_100,
+                channelCount = 2,
+                frameCount = frameCount.toLong(),
+            )
+            val factories = capacitiesForTest(
+                capacities = testCase.capacities,
+                geometry = geometry,
+                readSizes = readSizes,
+            )
+            val prepared = PreparedSourceSeparationPlaybackInputs(
+                stemFiles = stems,
+                stemIds = MDX_STEM_IDS,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                stemFrameCount = frameCount.toLong(),
+                factories = factories,
+            )
+            val processor = SourceSeparationMixAudioProcessor()
+            try {
+                processor.configure(
+                    AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
+                )
+                processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+                processor.enable(
+                    stemFiles = stems,
+                    stemIds = MDX_STEM_IDS,
+                    blendEndpointStemIds = MDX_STEM_IDS,
+                    positionMs = 0L,
+                    inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                    stemSampleRate = 44_100,
+                    stemChannelCount = 2,
+                    stemFrameCount = frameCount.toLong(),
+                    mixedOutputReadyPrerollMs = 0L,
+                    preparedInputs = prepared,
+                )
+                await { readSizes.isNotEmpty() }
+                assertEquals(testCase.expectedFirstReadFrames, readSizes.first())
+            } finally {
+                processor.disable()
+            }
         }
     }
 
@@ -871,6 +995,46 @@ class SourceSeparationMixAudioProcessorTest {
             }
         } finally {
             processor.disable()
+        }
+    }
+
+    private fun capacitiesForTest(
+        capacities: List<Int?>,
+        geometry: SourceSeparationPlaybackGeometry,
+        readSizes: CopyOnWriteArrayList<Int>,
+    ): List<SourceSeparationPlaybackStemSourceFactory> {
+        return capacities.mapIndexed { index, capacity ->
+            object : SourceSeparationPlaybackStemSourceFactory {
+                override val spec = SourceSeparationPlaybackStemSpec(
+                    stemId = MDX_STEM_IDS[index],
+                    geometry = geometry,
+                )
+
+                override val playbackBlockFrameCapacity: Int? = capacity
+
+                override fun open(): SourceSeparationPlaybackStemSource {
+                    return object : SourceSeparationPlaybackStemSource {
+                        override val geometry = spec.geometry
+
+                        override fun readFrames(
+                            startFrame: Long,
+                            destination: ByteArray,
+                            destinationOffsetBytes: Int,
+                            frameCount: Int,
+                        ): Int {
+                            readSizes += frameCount
+                            destination.fill(
+                                0,
+                                destinationOffsetBytes,
+                                destinationOffsetBytes + frameCount * BYTES_PER_FRAME,
+                            )
+                            return frameCount
+                        }
+
+                        override fun close() = Unit
+                    }
+                }
+            }
         }
     }
 

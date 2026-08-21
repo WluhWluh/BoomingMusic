@@ -623,9 +623,18 @@ const val SOURCE_SEPARATION_REMEMBER_PER_SONG = "source_separation.remember_per_
 const val SOURCE_SEPARATION_GPU_ENABLED = "source_separation.gpu_enabled"
 const val SOURCE_SEPARATION_WINDOW_DECODE = "source_separation.window_decode"
 const val SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION = "source_separation.auto_flac_compression"
+const val SOURCE_SEPARATION_COMPRESSION_FORMAT = "source_separation.compression_format"
 const val SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS = "source_separation.show_snackbar_progress"
 const val SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES = "source_separation.show_snackbar_messages"
 const val SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = "source_separation.mixed_output_preroll_ms"
+/** Experimental AAC seek gate; zero keeps the stable block waterline. */
+const val SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES =
+    "source_separation.aac_fast_seek_ready_frames"
+/** Experimental AAC sync-point direction; product default remains previous. */
+const val SOURCE_SEPARATION_AAC_SEEK_MODE = "source_separation.aac_seek_mode"
+/** Experimental AAC first post-seek block size; steady-state remains 4096 frames. */
+const val SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES =
+    "source_separation.aac_fast_seek_block_frames"
 const val SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT =
     "source_separation.playback_ready_window_count"
 const val SOURCE_SEPARATION_AUTO_CACHE_CLEANUP = "source_separation.auto_cache_cleanup"
@@ -647,6 +656,13 @@ const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT = 10
 const val MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT = 1
 const val DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 400L
 const val MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 5000L
+const val DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES = 0
+const val MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES = 512
+const val MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES = 4096
+const val DEFAULT_SOURCE_SEPARATION_AAC_SEEK_MODE = "previous"
+const val DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES = 1_024
+const val MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES = 512
+const val MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES = 4_096
 const val DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 2
 const val MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 2
 const val MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 8

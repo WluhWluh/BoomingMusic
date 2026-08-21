@@ -63,7 +63,13 @@ class SourceSeparationModelAwareCacheRepository(
                 totalSegments = manifest.segmentPlan?.segmentCount,
                 format = manifest.output?.stems?.firstOrNull()?.let { stem ->
                     if (stem.promotionValidated) {
-                        SourceSeparationModelAwareCacheFormat.Flac
+                        when (stem.resolvedPromotedFormat()) {
+                            SourceSeparationCacheAudioFormat.Flac ->
+                                SourceSeparationModelAwareCacheFormat.Flac
+                            SourceSeparationCacheAudioFormat.AacLcM4a ->
+                                SourceSeparationModelAwareCacheFormat.AacLcM4a
+                            else -> SourceSeparationModelAwareCacheFormat.Unknown
+                        }
                     } else {
                         SourceSeparationModelAwareCacheFormat.Wav
                     }
@@ -599,7 +605,7 @@ class SourceSeparationModelAwareCacheRepository(
 
     private fun SourceSeparationCacheManifest.canPromote(): Boolean {
         val stems = output?.stems ?: return false
-        return stems.any { !it.promotionValidated } && stems.all { stem ->
+        return stems.all { stem ->
             store.resolveEntryPath(cacheKey, stem.wavPath).isFile
         }
     }
@@ -667,6 +673,7 @@ enum class SourceSeparationModelAwareCacheEntryState {
 enum class SourceSeparationModelAwareCacheFormat {
     Wav,
     Flac,
+    AacLcM4a,
     Unknown,
 }
 

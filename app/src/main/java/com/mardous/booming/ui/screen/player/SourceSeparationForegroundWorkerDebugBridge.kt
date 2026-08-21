@@ -1,6 +1,7 @@
 package com.mardous.booming.ui.screen.player
 
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.SourceSeparationCompressionFormat
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import org.koin.java.KoinJavaComponent.get
 import java.lang.ref.WeakReference
@@ -65,6 +66,7 @@ object SourceSeparationForegroundWorkerDebugBridge {
         modeName: String? = null,
         blend: Float? = null,
         autoFlac: Boolean? = null,
+        compressionFormatName: String? = null,
         gpuEnabled: Boolean? = null,
         windowDecode: Boolean? = null,
         snackbarProgress: Boolean? = null,
@@ -80,6 +82,13 @@ object SourceSeparationForegroundWorkerDebugBridge {
         }
         val viewModel = viewModelRef?.get() ?: return false
         autoFlac?.let(viewModel::setSourceSeparationAutoFlacCompressionEnabled)
+        compressionFormatName?.let { name ->
+            val format = SourceSeparationCompressionFormat.entries.firstOrNull {
+                it.name.equals(name, ignoreCase = true) ||
+                        it.preferenceValue().equals(name, ignoreCase = true)
+            } ?: error("Unknown source-separation compression format '$name'.")
+            viewModel.setSourceSeparationCompressionFormat(format)
+        }
         gpuEnabled?.let(viewModel::setSourceSeparationGpuEnabled)
         windowDecode?.let(viewModel::setSourceSeparationWindowDecodeEnabled)
         snackbarProgress?.let(viewModel::setSourceSeparationShowSnackbarProgressEnabled)

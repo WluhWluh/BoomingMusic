@@ -40,6 +40,9 @@
     <string name="source_separation_try_flac_compression">Compress current cache to FLAC</string>
     <string name="source_separation_flac_compression_working">Compressing FLAC...</string>
     <string name="source_separation_flac_compression_queued">FLAC compression queued...</string>
+    <string name="source_separation_try_aac_compression">Compress current cache to AAC-LC/M4A</string>
+    <string name="source_separation_aac_compression_working">Compressing AAC-LC/M4A...</string>
+    <string name="source_separation_aac_compression_queued">AAC-LC/M4A compression queued...</string>
     <string name="source_separation_window_decode_experiment">Test window decoding</string>
     <string name="source_separation_window_decode_running">Testing local window decode (%1$d%%, step %2$d/%3$d): %4$s\nCurrent stage: %5$s</string>
     <string name="source_separation_window_decode_no_song">No playable song is selected.</string>
@@ -72,6 +75,11 @@
     <string name="source_separation_window_decode_description">Decode supported formats window by window so separated playback can become available sooner.</string>
     <string name="source_separation_auto_flac_compression_title">Automatically compress completed caches</string>
     <string name="source_separation_auto_flac_compression_description">After a full WAV separation completes, convert its stems to FLAC for future playback.</string>
+    <string name="source_separation_auto_compression_title">Completed cache format</string>
+    <string name="source_separation_auto_compression_description">Choose one optional full-song compression format. FLAC and AAC-LC/M4A are mutually exclusive.</string>
+    <string name="source_separation_compression_none">WAV</string>
+    <string name="source_separation_compression_flac">FLAC</string>
+    <string name="source_separation_compression_aac">AAC 160k</string>
     <string name="source_separation_show_snackbar_progress_title">Show separation progress snackbars</string>
     <string name="source_separation_show_snackbar_progress_description">Show preparation, progress, completion, cancel, and failure messages on the player screen.</string>
     <string name="source_separation_show_snackbar_messages_title">Show playback notices</string>
@@ -374,6 +382,7 @@
     <string name="source_separation_cache_format_label">Format</string>
     <string name="source_separation_cache_format_wav">WAV</string>
     <string name="source_separation_cache_format_flac">FLAC</string>
+    <string name="source_separation_cache_format_aac_m4a">AAC-LC/M4A</string>
     <string name="source_separation_cache_format_unknown">Unknown</string>
     <string name="source_separation_cache_size_label">Size</string>
     <string name="source_separation_cache_updated_label">Updated</string>

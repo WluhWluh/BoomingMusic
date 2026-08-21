@@ -4,13 +4,16 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
+import com.mardous.booming.playback.SourceSeparationAacSeekMode
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
+import com.mardous.booming.separation.SourceSeparationCompressionFormat
 import com.mardous.booming.separation.SourceSeparationCacheModelActivator
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationMixModelKey
 import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.SourceSeparationStemGainPolicy
+import com.mardous.booming.separation.sourceSeparationCompressionFormat
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
@@ -22,19 +25,30 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COM
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_GPU_ENABLED
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AAC_SEEK_MODE
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT
+import com.mardous.booming.util.MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
 import com.mardous.booming.util.MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_COMPRESSION_FORMAT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED
+import com.mardous.booming.util.SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
+import com.mardous.booming.util.SOURCE_SEPARATION_AAC_SEEK_MODE
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_ENABLED
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
@@ -87,6 +101,10 @@ internal class SourceSeparationDebugResourceController(
                 prefs.getBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, true),
             )
             .put(
+                "compressionFormat",
+                prefs.sourceSeparationCompressionFormat().preferenceValue(),
+            )
+            .put(
                 "showSnackbarProgress",
                 prefs.getBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, false),
             )
@@ -100,6 +118,29 @@ internal class SourceSeparationDebugResourceController(
                     SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS,
                     DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS,
                 ),
+            )
+            .put(
+                "aacFastSeekReadyFrames",
+                prefs.getInt(
+                    SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES,
+                    DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES,
+                ),
+            )
+            .put(
+                "aacFastSeekBlockFrames",
+                prefs.getInt(
+                    SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES,
+                    DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES,
+                ),
+            )
+            .put(
+                "aacSeekMode",
+                SourceSeparationAacSeekMode.fromPreference(
+                    prefs.getString(
+                        SOURCE_SEPARATION_AAC_SEEK_MODE,
+                        DEFAULT_SOURCE_SEPARATION_AAC_SEEK_MODE,
+                    ),
+                ).preferenceValue,
             )
             .put(
                 "playbackReadyWindowCount",
@@ -139,12 +180,45 @@ internal class SourceSeparationDebugResourceController(
         val gpuEnabled = args.optionalBoolean("gpu_enabled")
         val windowDecode = args.optionalBoolean("window_decode")
         val autoFlac = args.optionalBoolean("auto_flac")
+        val compressionFormatName = args.optionalString("compression_format")
+        val compressionFormat = compressionFormatName?.let { name ->
+            SourceSeparationCompressionFormat.entries.firstOrNull {
+                it.name.equals(name, ignoreCase = true) ||
+                        it.preferenceValue().equals(name, ignoreCase = true)
+            } ?: error("Unknown compression_format '$name'.")
+        }
         val snackbarProgress = args.optionalBoolean("snackbar_progress")
         val snackbarMessages = args.optionalBoolean("snackbar_messages")
         val prerollMs = args.optionalLong("preroll_ms")?.also { value ->
             require(value in 0L..MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS) {
                 "preroll_ms must be between 0 and $MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS."
             }
+        }
+        val aacSeekReadyFrames = args.optionalInt("aac_seek_ready_frames")?.also { value ->
+            require(
+                value == DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES ||
+                    value in MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES..
+                    MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES,
+            ) {
+                "aac_seek_ready_frames must be 0 or between " +
+                    "$MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES and " +
+                    "$MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES."
+            }
+        }
+        val aacSeekBlockFrames = args.optionalInt("aac_seek_block_frames")?.also { value ->
+            require(
+                value in MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES..
+                    MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES,
+            ) {
+                "aac_seek_block_frames must be between " +
+                    "$MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES and " +
+                    "$MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES."
+            }
+        }
+        val aacSeekMode = args.optionalString("aac_seek_mode")?.let { value ->
+            SourceSeparationAacSeekMode.entries.firstOrNull { mode ->
+                mode.preferenceValue.equals(value, ignoreCase = true)
+            } ?: error("aac_seek_mode must be previous, closest, or next.")
         }
         val readyWindows = args.optionalInt("ready_windows")?.also { value ->
             require(value in MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT..
@@ -177,9 +251,13 @@ internal class SourceSeparationDebugResourceController(
                 gpuEnabled,
                 windowDecode,
                 autoFlac,
+                compressionFormat,
                 snackbarProgress,
                 snackbarMessages,
                 prerollMs,
+                aacSeekReadyFrames,
+                aacSeekBlockFrames,
+                aacSeekMode,
                 readyWindows,
                 autoCleanup,
                 partialLimit,
@@ -191,6 +269,7 @@ internal class SourceSeparationDebugResourceController(
             autoStart = autoStart,
             modeName = mode,
             autoFlac = autoFlac,
+            compressionFormatName = compressionFormat?.preferenceValue(),
             gpuEnabled = gpuEnabled,
             windowDecode = windowDecode,
             snackbarProgress = snackbarProgress,
@@ -201,12 +280,30 @@ internal class SourceSeparationDebugResourceController(
             partialCacheLimit = partialLimit,
             completedCacheLimit = completedLimit,
         )
+        if (aacSeekReadyFrames != null || aacSeekBlockFrames != null || aacSeekMode != null) {
+            preferences.edit {
+                aacSeekReadyFrames?.let {
+                    putInt(SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES, it)
+                }
+                aacSeekBlockFrames?.let {
+                    putInt(SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES, it)
+                }
+                aacSeekMode?.let {
+                    putString(SOURCE_SEPARATION_AAC_SEEK_MODE, it.preferenceValue)
+                }
+            }
+        }
         if (!uiApplied) {
             preferences.edit {
                 autoStart?.let { putBoolean(SOURCE_SEPARATION_AUTO_START, it) }
                 gpuEnabled?.let { putBoolean(SOURCE_SEPARATION_GPU_ENABLED, it) }
                 windowDecode?.let { putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, it) }
                 autoFlac?.let { putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, it) }
+                compressionFormat?.let {
+                    putString(SOURCE_SEPARATION_COMPRESSION_FORMAT, it.preferenceValue())
+                    putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, it ==
+                            SourceSeparationCompressionFormat.Flac)
+                }
                 snackbarProgress?.let {
                     putBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, it)
                 }

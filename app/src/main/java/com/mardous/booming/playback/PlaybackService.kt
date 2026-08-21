@@ -97,6 +97,8 @@ import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.PreparedSourceSeparationPlaybackInputs
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
+import com.mardous.booming.playback.SourceSeparationAacPlaybackProfile
+import com.mardous.booming.playback.SourceSeparationAacSeekMode
 import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
@@ -111,11 +113,13 @@ import com.mardous.booming.separation.SourceSeparationExecutionSelectionSnapshot
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationStemGainPolicy
+import com.mardous.booming.separation.sourceSeparationCompressionFormat
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.promoteSourceSeparationCacheWhenAvailable
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheOutput
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheAudioFormat
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePlayback
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
@@ -132,10 +136,17 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_
 import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AAC_SEEK_MODE
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.ENABLE_HISTORY
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
+import com.mardous.booming.util.MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MP3_INDEX_SEEKING
@@ -149,6 +160,9 @@ import com.mardous.booming.util.REWIND_WITH_BACK
 import com.mardous.booming.util.SEEK_INTERVAL
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES
+import com.mardous.booming.util.SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES
+import com.mardous.booming.util.SOURCE_SEPARATION_AAC_SEEK_MODE
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_REMEMBER_PER_SONG
@@ -263,6 +277,11 @@ class PlaybackService :
     private var sourceSeparationCompletedCleanupJob: Job? = null
     private var sourceSeparationDataPlaneMonitorSessionId: Long? = null
     private var sourceSeparationDataPlaneResumeWhenReady = false
+    /**
+     * Bounds the AAC-only first-output bypass to one short seek-resume window.
+     * A real no-data timeout still falls back to the normal buffering gate.
+     */
+    private var sourceSeparationAacFastResumeGraceUntilMs = 0L
     private var sourceSeparationPlaybackTraceFile: File? = null
     private var sourceSeparationPlaybackTraceFlushJob: Job? = null
     private var sourceSeparationPlaybackTraceWriteJob: Job? = null
@@ -288,6 +307,11 @@ class PlaybackService :
     private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationForegroundServiceType: Int? = null
     private var sourceSeparationForegroundServiceTypeUpdatedAtMs = 0L
+
+    private val sourceSeparationAacFastResumeGraceActive: Boolean
+        get() = sourceSeparationAacFastResumeGraceUntilMs > SystemClock.elapsedRealtime() &&
+                sourceSeparationMixProcessor.isAacFastResumeActive() &&
+                sourceSeparationMixProcessor.isAacFastResumePending()
 
     private var headsetClickCount = 0
     private val headsetClickRunnable = Runnable {
@@ -435,13 +459,18 @@ class PlaybackService :
         observeSourceSeparationForegroundWorker()
         observeSourceSeparationActiveSelection()
         observeSourceSeparationProcessingOwnership()
-        mediaSessionPlayer = SourceSeparationMediaSessionPlayer(player) {
-            sourceSeparationPlaybackResumeWhenReady = false
-            sourceSeparationPlaybackPlayIntent = false
-            updateSourceSeparationMediaSessionBuffering()
-            updateSourceSeparationProcessingLease("mediaSessionVirtualPause")
-            broadcastSourceSeparationPlaybackChanged()
-        }
+        mediaSessionPlayer = SourceSeparationMediaSessionPlayer(
+            player = player,
+            onSourceSeparationVirtualPause = {
+                sourceSeparationPlaybackResumeWhenReady = false
+                sourceSeparationPlaybackPlayIntent = false
+                updateSourceSeparationMediaSessionBuffering()
+                updateSourceSeparationProcessingLease("mediaSessionVirtualPause")
+                broadcastSourceSeparationPlaybackChanged()
+            },
+            onSourceSeparationPlayRequested =
+                ::deferSourceSeparationPlayUntilDataPlaneReady,
+        )
 
         mediaSession = with(MediaLibrarySession.Builder(this, mediaSessionPlayer, this)) {
             setId(packageName)
@@ -918,9 +947,14 @@ class PlaybackService :
                         SourceSeparationModelAwareEngineResult.ActiveModelUnavailable ->
                             throw IllegalStateException("The resolved model became unavailable.")
                     }
-                    if (preferences.getBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, true)) {
+                    val compressionFormat = preferences.sourceSeparationCompressionFormat()
+                        .cacheFormat()
+                    if (compressionFormat != null) {
                         promoteSourceSeparationCacheWhenAvailable(shouldCancel = { false }) {
-                            sourceSeparationRuntime.promote(manifest.cacheKey)
+                            sourceSeparationRuntime.promote(
+                                cacheKey = manifest.cacheKey,
+                                format = compressionFormat,
+                            )
                         }
                     }
                     sourceSeparationRuntime.cleanCompletedTemporaryFiles(manifest.cacheKey)
@@ -1297,6 +1331,15 @@ class PlaybackService :
             setSourceSeparationPlayWhenReady(false)
             flushSourceSeparationPausedOutput("processingUserPlay")
             scheduleSourceSeparationPlaybackGateRetry()
+        } else if (!isInternalPlayWhenReadyChange &&
+            playWhenReady &&
+            sourceSeparationPlaybackSession != null &&
+            !sourceSeparationMixProcessor.isDataPlaneReady()
+        ) {
+            gateSourceSeparationDataPlaneUntilReady(
+                session = sourceSeparationPlaybackSession,
+                reason = "userPlayUnreadyDataPlane",
+            )
         } else if (!isInternalPlayWhenReadyChange &&
             playWhenReady &&
             (sourceSeparationPlaybackSession == null ||
@@ -2325,6 +2368,23 @@ class PlaybackService :
                     stemIds = stemIds,
                     stemSampleRate = output.outputSampleRate,
                     stemChannelCount = channelCount,
+                    stemFrameCount = output.outputFrameCount.toLong(),
+                    aacProfiles = output.stems.map { stem ->
+                        if (stem.resolvedPromotedFormat() == SourceSeparationCacheAudioFormat.AacLcM4a) {
+                            SourceSeparationAacPlaybackProfile(
+                                encoderDelayFrames = stem.promotedEncoderDelayFrames,
+                                encoderPaddingFrames = stem.promotedPaddingFrames,
+                                seekQuantumFrames = stem.promotedSeekQuantumFrames,
+                                maxAnchorOffsetFrames = stem.promotedMaxAnchorOffsetFrames,
+                                timestampOffsetFrames = stem.promotedTimestampOffsetFrames,
+                                fastSeekBlockFrames = sourceSeparationAacFastSeekBlockFrames,
+                                fastSeekReadyFrames = sourceSeparationAacFastSeekReadyFrames,
+                                seekMode = sourceSeparationAacSeekMode,
+                            )
+                        } else {
+                            null
+                        }
+                    },
                     frameAvailability = if (isPartialCache) {
                         sourceSeparationPlaybackFrameAvailability(
                             runtimeSong = runtimeSong,
@@ -2627,7 +2687,8 @@ class PlaybackService :
         return session.requiresReadinessGate ||
                 session.inputMode != InputMode.OriginalSource ||
                 session.stemFiles.any { file ->
-                    !file.extension.equals("flac", ignoreCase = true)
+                    !file.extension.equals("flac", ignoreCase = true) &&
+                            !file.extension.equals("m4a", ignoreCase = true)
                 }
     }
 
@@ -2711,6 +2772,23 @@ class PlaybackService :
                 stemIds = stemIds,
                 stemSampleRate = output.outputSampleRate,
                 stemChannelCount = channelCount,
+                stemFrameCount = output.outputFrameCount.toLong(),
+                aacProfiles = output.stems.map { stem ->
+                    if (stem.resolvedPromotedFormat() == SourceSeparationCacheAudioFormat.AacLcM4a) {
+                        SourceSeparationAacPlaybackProfile(
+                            encoderDelayFrames = stem.promotedEncoderDelayFrames,
+                            encoderPaddingFrames = stem.promotedPaddingFrames,
+                            seekQuantumFrames = stem.promotedSeekQuantumFrames,
+                            maxAnchorOffsetFrames = stem.promotedMaxAnchorOffsetFrames,
+                            timestampOffsetFrames = stem.promotedTimestampOffsetFrames,
+                            fastSeekBlockFrames = sourceSeparationAacFastSeekBlockFrames,
+                            fastSeekReadyFrames = sourceSeparationAacFastSeekReadyFrames,
+                            seekMode = sourceSeparationAacSeekMode,
+                        )
+                    } else {
+                        null
+                    }
+                },
             )
         }
         val blendEndpointStemIds = manifest.mdxBlendEndpointStemIds()
@@ -3316,6 +3394,33 @@ class PlaybackService :
             DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS,
         ).coerceIn(0L, MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS)
 
+    private val sourceSeparationAacFastSeekReadyFrames: Int?
+        get() = preferences.getInt(
+            SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES,
+            DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES,
+        ).takeIf { value -> value > 0 }
+            ?.coerceIn(
+                MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES,
+                MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_READY_FRAMES,
+            )
+
+    private val sourceSeparationAacFastSeekBlockFrames: Int
+        get() = preferences.getInt(
+            SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES,
+            DEFAULT_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES,
+        ).coerceIn(
+            MIN_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES,
+            MAX_SOURCE_SEPARATION_AAC_FAST_SEEK_BLOCK_FRAMES,
+        )
+
+    private val sourceSeparationAacSeekMode: SourceSeparationAacSeekMode
+        get() = SourceSeparationAacSeekMode.fromPreference(
+            preferences.getString(
+                SOURCE_SEPARATION_AAC_SEEK_MODE,
+                DEFAULT_SOURCE_SEPARATION_AAC_SEEK_MODE,
+            ),
+        )
+
     private val sourceSeparationPlaybackReadyWindowCount: Int
         get() = preferences.getInt(
             SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
@@ -3337,6 +3442,7 @@ class PlaybackService :
         val session = sourceSeparationPlaybackSession
         val resumeAfterSwitch = player.playWhenReady
         sourceSeparationPlaybackSession = null
+        sourceSeparationAacFastResumeGraceUntilMs = 0L
         cancelSourceSeparationPlaybackReadinessMonitor("clear")
         cancelSourceSeparationDataPlaneMonitor("clear")
         clearSourceSeparationOutputFlushBarrier("playback.clear")
@@ -3734,11 +3840,20 @@ class PlaybackService :
             SourceSeparationPlaybackDataState.Seeking,
             SourceSeparationPlaybackDataState.HotSwapping,
             -> {
-                gateSourceSeparationDataPlaneUntilReady(session, reason)
-                true
+                if (sourceSeparationAacFastResumeGraceActive) {
+                    traceSourceSeparationPlayback(
+                        "playback.dataPlaneMonitor.aacFastResumeGrace",
+                        "songId=${session.songId} session=${session.sessionId} reason=$reason",
+                    )
+                    true
+                } else {
+                    gateSourceSeparationDataPlaneUntilReady(session, reason)
+                    true
+                }
             }
 
             SourceSeparationPlaybackDataState.Ready -> {
+                sourceSeparationAacFastResumeGraceUntilMs = 0L
                 sourceSeparationMixProcessor.consumeDataPlaneReadyNotification()
                 resumeSourceSeparationDataPlaneIfRequested(session)
                 true
@@ -3753,6 +3868,26 @@ class PlaybackService :
             SourceSeparationPlaybackDataState.Ended,
             -> false
         }
+    }
+
+    private fun deferSourceSeparationPlayUntilDataPlaneReady(): Boolean {
+        val session = sourceSeparationPlaybackSession ?: return false
+        if (sourceSeparationMixProcessor.isDataPlaneReady()) return false
+
+        sourceSeparationPlaybackPlayIntent = true
+        sourceSeparationDataPlaneResumeWhenReady = true
+        muteSourceSeparationOutputForSwitch(
+            reason = "mediaSessionPlayUnreadyDataPlane",
+            waitForMixedOutput = true,
+        )
+        updateSourceSeparationDataPlaneMonitor(session)
+        updateSourceSeparationMediaSessionBuffering()
+        traceSourceSeparationPlayback(
+            "playback.mediaSessionPlay.deferred",
+            "songId=${session.songId} session=${session.sessionId} " +
+                    "state=${sourceSeparationMixProcessor.dataPlaneState()}",
+        )
+        return true
     }
 
     private fun gateSourceSeparationDataPlaneUntilReady(
@@ -3770,6 +3905,7 @@ class PlaybackService :
                 player.isPlaying ||
                 sourceSeparationPlaybackPlayIntent
         sourceSeparationDataPlaneResumeWhenReady = shouldResume
+        updateSourceSeparationMediaSessionBuffering()
         val unavailableFrame = sourceSeparationMixProcessor.dataPlaneUnavailableFrame()
         if (session.requiresReadinessGate &&
             unavailableFrame != null &&
@@ -3825,6 +3961,7 @@ class PlaybackService :
         }
         val shouldResume = sourceSeparationPlaybackPlayIntent
         sourceSeparationDataPlaneResumeWhenReady = false
+        updateSourceSeparationMediaSessionBuffering()
         traceSourceSeparationPlayback(
             "playback.dataPlaneMonitor.ready",
             "songId=${session.songId} session=${session.sessionId} resume=$shouldResume",
@@ -4020,7 +4157,7 @@ class PlaybackService :
             val delayMs = if (waitForMixedOutput) {
                 SOURCE_SEPARATION_OUTPUT_UNMUTE_FALLBACK_DELAY_MS
             } else {
-                SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS
+                sourceSeparationOutputUnmuteDelayMs
             }
             delay(delayMs)
             if (sourceSeparationPlaybackIsProcessing ||
@@ -4075,6 +4212,24 @@ class PlaybackService :
             )
             return
         }
+        val releaseAacFastResume =
+            sourceSeparationPlaybackPlayIntent &&
+                    sourceSeparationDataPlaneResumeWhenReady &&
+                    !sourceSeparationMixProcessor.isDataPlaneReady() &&
+                    sourceSeparationMixProcessor.isAacFastResumeActive() &&
+                    sourceSeparationMixProcessor.isAacFastResumePending()
+        if (releaseAacFastResume) {
+            sourceSeparationAacFastResumeGraceUntilMs =
+                SystemClock.elapsedRealtime() + AAC_FAST_RESUME_GRACE_MS
+            sourceSeparationDataPlaneResumeWhenReady = false
+            updateSourceSeparationMediaSessionBuffering()
+            traceSourceSeparationPlayback(
+                "playback.aacFastResume",
+                "session=${sourceSeparationPlaybackSession?.sessionId} " +
+                        "generation=$outputGeneration graceMs=$AAC_FAST_RESUME_GRACE_MS",
+            )
+            setSourceSeparationPlayWhenReady(true)
+        }
         traceSourceSeparationPlayback(
             "playback.mixedOutputStarted",
             "source=$reason generation=$outputGeneration",
@@ -4084,10 +4239,17 @@ class PlaybackService :
         sourceSeparationOutputWaitingForMixedOutput = false
         sourceSeparationOutputMuteJob?.cancel()
         sourceSeparationOutputMuteJob = serviceScope.launch {
-            delay(SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS)
+            delay(sourceSeparationOutputUnmuteDelayMs)
             restoreSourceSeparationOutputVolume("mixedOutputStarted")
         }
     }
+
+    private val sourceSeparationOutputUnmuteDelayMs: Long
+        get() = if (sourceSeparationMixProcessor.isAacFastResumeActive()) {
+            0L
+        } else {
+            SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS
+        }
 
     private fun restoreSourceSeparationOutputVolume(reason: String) {
         if (!sourceSeparationOutputMuted) return
@@ -4272,8 +4434,11 @@ class PlaybackService :
     }
 
     private fun isSourceSeparationMediaSessionBuffering(): Boolean {
-        return sourceSeparationPlaybackIsProcessing &&
-                sourceSeparationPlaybackResumeWhenReady
+        return (sourceSeparationPlaybackIsProcessing &&
+                sourceSeparationPlaybackResumeWhenReady) ||
+                (sourceSeparationPlaybackSession != null &&
+                        sourceSeparationDataPlaneResumeWhenReady &&
+                        !sourceSeparationMixProcessor.isDataPlaneReady())
     }
 
     private fun startSourceSeparationProcessingLease(reason: String) {
@@ -5277,6 +5442,7 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_DATA_PLANE_MONITOR_FALLBACK_DELAY_MS = 250L
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS = 120L
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_FALLBACK_DELAY_MS = 1500L
+        private const val AAC_FAST_RESUME_GRACE_MS = 500L
         private const val SOURCE_SEPARATION_BLEND_FLUSH_SEEK_OFFSET_MS = 10L
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_PENDING_TIMEOUT_MS = 10_000L
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TARGET_TIMEOUT_MS = 10 * 60_000L

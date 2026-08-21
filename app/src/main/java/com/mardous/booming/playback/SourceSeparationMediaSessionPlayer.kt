@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 class SourceSeparationMediaSessionPlayer(
     player: Player,
     private val onSourceSeparationVirtualPause: () -> Unit,
+    private val onSourceSeparationPlayRequested: () -> Boolean = { false },
 ) : ForwardingPlayer(player) {
 
     private val listeners = mutableListOf<Player.Listener>()
@@ -56,7 +57,13 @@ class SourceSeparationMediaSessionPlayer(
         super.pause()
     }
 
+    override fun play() {
+        if (onSourceSeparationPlayRequested()) return
+        super.play()
+    }
+
     override fun setPlayWhenReady(playWhenReady: Boolean) {
+        if (playWhenReady && onSourceSeparationPlayRequested()) return
         if (sourceSeparationVirtualBuffering && !playWhenReady) {
             onSourceSeparationVirtualPause()
         }

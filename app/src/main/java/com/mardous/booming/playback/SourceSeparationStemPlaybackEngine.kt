@@ -3,7 +3,14 @@ package com.mardous.booming.playback
 import com.mardous.booming.separation.model.contract.StemSet
 import java.io.Closeable
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.Semaphore
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.min
@@ -27,6 +34,26 @@ internal interface SourceSeparationPlaybackStemSourceFactory {
     val openFileDescriptorCount: Int
         get() = 1
 
+    /** Maximum independent stem sources for a post-seek fast-resume read. */
+    val fastSeekParallelism: Int
+        get() = 1
+
+    /** Optional source-specific block size for the playback engine. */
+    val playbackBlockFrameCapacity: Int?
+        get() = null
+
+    /** Optional smaller block used only for the first block after a seek. */
+    val seekResumeBlockFrameCapacity: Int?
+        get() = null
+
+    /** Optional number of frames that is enough to release the seek gate early. */
+    val seekResumeReadyFrameCapacity: Int?
+        get() = null
+
+    /** Whether a seek may return a currently available partial PCM block. */
+    val allowPartialSeekRead: Boolean
+        get() = false
+
     fun open(): SourceSeparationPlaybackStemSource
 }
 
@@ -37,6 +64,8 @@ internal fun interface SourceSeparationPlaybackFrameAvailability {
 
 internal class SourceSeparationStemPlaybackEngine(
     private val blockFrames: Int = DEFAULT_BLOCK_FRAMES,
+    private val seekResumeBlockFrames: Int? = null,
+    private val seekResumeReadyFrames: Int? = null,
     private val resumeWaterlineBlocks: Int = DEFAULT_RESUME_WATERLINE_BLOCKS,
     private val seekResumeWaterlineBlocks: Int = DEFAULT_SEEK_RESUME_WATERLINE_BLOCKS,
     private val targetWaterlineBlocks: Int = DEFAULT_TARGET_WATERLINE_BLOCKS,
@@ -46,6 +75,7 @@ internal class SourceSeparationStemPlaybackEngine(
     private val realtimeAudit: SourceSeparationPlaybackRealtimeAudit =
         SourceSeparationPlaybackRealtimeAudit(),
     private val stateChangedSink: ((SourceSeparationPlaybackDataState) -> Unit)? = null,
+    private val failureSink: ((Throwable) -> Unit)? = null,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val command = AtomicReference<EngineCommand?>(null)
@@ -67,6 +97,15 @@ internal class SourceSeparationStemPlaybackEngine(
     private val readyBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val freeBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val worker = Thread(::workerLoop, "BoomingStemDecode")
+    private val fastSeekExecutorLock = Any()
+
+    @Volatile
+    private var fastSeekExecutor: ExecutorService? = null
+
+    @Volatile
+    private var fastSeekExecutorSize = 0
+
+    private val fastSeekInFlight = AtomicInteger(0)
 
     @Volatile
     private var activeSession: SourceSeparationPlaybackDataSession? = null
@@ -99,6 +138,14 @@ internal class SourceSeparationStemPlaybackEngine(
 
     init {
         require(blockFrames > 0) { "Playback block size must be positive." }
+        require(seekResumeBlockFrames == null ||
+                seekResumeBlockFrames in 1..blockFrames) {
+            "Seek resume block size must be within the playback block size."
+        }
+        require(seekResumeReadyFrames == null ||
+                seekResumeReadyFrames in 1..blockFrames) {
+            "Seek resume ready threshold must be within the steady-state block size."
+        }
         require(blockCapacity > 0) { "Playback block capacity must be positive." }
         require(maxBufferPoolBytes > 0L) { "Playback buffer budget must be positive." }
         require(resumeWaterlineBlocks in 1..targetWaterlineBlocks) {
@@ -122,6 +169,12 @@ internal class SourceSeparationStemPlaybackEngine(
 
     val blockFrameCapacity: Int
         get() = blockFrames
+
+    val seekResumeBlockFrameCapacity: Int?
+        get() = seekResumeBlockFrames
+
+    val seekResumeReadyFrameCapacity: Int?
+        get() = seekResumeReadyFrames
 
     val currentSession: SourceSeparationPlaybackDataSession?
         get() = activeSession
@@ -153,6 +206,7 @@ internal class SourceSeparationStemPlaybackEngine(
             drainReadyBlocks()
             ensureBlockPool(specs.size, specs.first().geometry.channelCount)
             workerFactories = factories.toList()
+            prepareFastSeekExecutor(factories)
             workerFrameAvailability = frameAvailability
             workerNextFrame = startFrame.coerceIn(0L, session.geometry.frameCount)
             state.set(SourceSeparationPlaybackDataState.Preparing)
@@ -216,6 +270,7 @@ internal class SourceSeparationStemPlaybackEngine(
             drainReadyBlocks()
             ensureBlockPool(session.stems.size, session.geometry.channelCount)
             workerFactories = factories.toList()
+            prepareFastSeekExecutor(factories)
             workerNextFrame = startFrame.coerceIn(0L, session.geometry.frameCount)
             state.set(SourceSeparationPlaybackDataState.HotSwapping)
             metrics.recordEpochChange()
@@ -242,15 +297,19 @@ internal class SourceSeparationStemPlaybackEngine(
         val availableFrames = readyFrameCount.get()
         val hasCleanEndOfStreamTail = endOfStreamQueued.get() && availableFrames > 0L
         if (availableFrames < frameCount.toLong() && !hasCleanEndOfStreamTail) {
-            if (seekResumeState.get() == SeekResumeState.Waiting) {
+            if (seekResumeState.get() == SeekResumeState.Waiting &&
+                !allowPartialSeekRead()
+            ) {
                 return 0
             }
-            markRecovery(underflow = true)
-            state.compareAndSet(
-                SourceSeparationPlaybackDataState.Ready,
-                SourceSeparationPlaybackDataState.Buffering,
-            )
-            return 0
+            if (!allowPartialSeekRead()) {
+                markRecovery(underflow = true)
+                state.compareAndSet(
+                    SourceSeparationPlaybackDataState.Ready,
+                    SourceSeparationPlaybackDataState.Buffering,
+                )
+                return 0
+            }
         }
         val bytesPerFrame = session.geometry.channelCount * BYTES_PER_SAMPLE
         require(destinations.size == session.stems.size) {
@@ -321,7 +380,17 @@ internal class SourceSeparationStemPlaybackEngine(
         ) {
             markRecovery(underflow = false)
         }
-        if (copiedFrames < frameCount) {
+        // A seek-capable AAC source may intentionally return the first ready
+        // block as a partial read while the decoder fills the following block.
+        // Keep the early-ready state in that case; flipping it back to
+        // Buffering makes PlaybackService pause again after the first PCM has
+        // already been produced. A zero-frame read still enters Buffering and
+        // preserves the normal underflow/timeout path.
+        val partialSeekRead = copiedFrames > 0 &&
+                copiedFrames < frameCount &&
+                allowPartialSeekRead() &&
+                isSeekResumePending()
+        if (copiedFrames < frameCount && !partialSeekRead) {
             state.compareAndSet(
                 SourceSeparationPlaybackDataState.Ready,
                 SourceSeparationPlaybackDataState.Buffering,
@@ -336,15 +405,24 @@ internal class SourceSeparationStemPlaybackEngine(
     }
 
     fun hasResumeWaterline(): Boolean {
+        if (!recoveryRequired.get() && seekResumeState.get() == SeekResumeState.Granted) {
+            return true
+        }
+        val earlyReadyFrames = effectiveSeekResumeReadyFrames()
         if (!recoveryRequired.get() &&
-            seekResumeState.get() == SeekResumeState.Granted
+            seekResumeState.get() != SeekResumeState.None &&
+            earlyReadyFrames != null &&
+            readyFrameCount.get() >= earlyReadyFrames
         ) {
             return true
         }
-        val requiredFrames = requiredResumeWaterlineBlocks() * blockFrames
+        val requiredFrames = requiredResumeWaterlineFrames()
         return readyFrameCount.get() >= requiredFrames ||
                 (endOfStreamQueued.get() && readyFrameCount.get() > 0L)
     }
+
+    /** True while the current seek epoch is still filling its resume blocks. */
+    fun isSeekResumePending(): Boolean = seekResumeState.get() != SeekResumeState.None
 
     fun pollReadyNotification(): Boolean {
         return readyNotificationEpoch.getAndSet(0L) > 0L
@@ -391,6 +469,7 @@ internal class SourceSeparationStemPlaybackEngine(
         if (Thread.currentThread() !== worker) {
             runCatching { worker.join(WORKER_JOIN_TIMEOUT_MS) }
         }
+        shutdownFastSeekExecutor()
         clearConsumerBlock()
         drainReadyBlocks()
         workerSources.forEach { source -> runCatching { source.close() } }
@@ -467,39 +546,36 @@ internal class SourceSeparationStemPlaybackEngine(
                     continue
                 }
                 unavailableFrame.set(NO_UNAVAILABLE_FRAME)
+                val activeBlockFrames = if (seekResumeBlockFrames != null &&
+                    seekResumeState.get() == SeekResumeState.Waiting
+                ) {
+                    seekResumeBlockFrames
+                } else {
+                    blockFrames
+                }
                 val frames = min(
-                    min(blockFrames.toLong(), remaining),
+                    min(activeBlockFrames.toLong(), remaining),
                     readableFrames,
                 ).toInt()
-                var successful = true
-                for (stemIndex in factories.indices) {
-                    val read = try {
-                        workerSources[stemIndex].readFrames(
-                            startFrame = workerNextFrame,
-                            destination = block.stemPcm[stemIndex],
-                            destinationOffsetBytes = 0,
-                            frameCount = frames,
-                        )
-                    } catch (error: Throwable) {
-                        successful = false
-                        publishWorkerState(SourceSeparationPlaybackDataState.Failed, currentEpoch)
-                        block.reset(currentEpoch)
-                        freeBlocks.offer(block)
-                        closeWorkerSources()
-                        drainReadyBlocks()
-                        workerFactories = emptyList()
-                        break
-                    }
-                    if (read != frames) {
-                        successful = false
-                        publishWorkerState(SourceSeparationPlaybackDataState.Failed, currentEpoch)
-                        block.reset(currentEpoch)
-                        freeBlocks.offer(block)
-                        closeWorkerSources()
-                        drainReadyBlocks()
-                        workerFactories = emptyList()
-                        break
-                    }
+                val successful = try {
+                    readStemBlock(
+                        factories = factories,
+                        sources = workerSources,
+                        startFrame = workerNextFrame,
+                        block = block,
+                        frameCount = frames,
+                        parallelFirstBlock = seekResumeState.get() == SeekResumeState.Waiting,
+                    )
+                    true
+                } catch (error: Throwable) {
+                    runCatching { failureSink?.invoke(error) }
+                    publishWorkerState(SourceSeparationPlaybackDataState.Failed, currentEpoch)
+                    block.reset(currentEpoch)
+                    freeBlocks.offer(block)
+                    closeWorkerSources()
+                    drainReadyBlocks()
+                    workerFactories = emptyList()
+                    false
                 }
                 if (!successful) continue
                 val published = synchronized(transitionLock) {
@@ -519,9 +595,14 @@ internal class SourceSeparationStemPlaybackEngine(
                             false
                         } else {
                             readyFrameCount.addAndGet(frames.toLong())
+                            val seekWaterlineFrameCount = effectiveSeekResumeReadyFrames()
+                                ?: maxOf(
+                                    seekResumeWaterlineBlocks.toLong() * blockFrames,
+                                    seekResumeWaterlineBlocks.toLong() *
+                                            (seekResumeBlockFrames ?: blockFrames),
+                                )
                             if (!recoveryRequired.get() &&
-                                readyFrameCount.get() >=
-                                    seekResumeWaterlineBlocks.toLong() * blockFrames
+                                readyFrameCount.get() >= seekWaterlineFrameCount
                             ) {
                                 seekResumeState.compareAndSet(
                                     SeekResumeState.Waiting,
@@ -542,8 +623,8 @@ internal class SourceSeparationStemPlaybackEngine(
                             workerNextFrame += frames
                             metrics.recordDecodeBlock(System.nanoTime() - startNs)
                             metrics.recordRingOccupancy(readyBlocks.size)
-                            val requiredBlocks = requiredResumeWaterlineBlocks()
-                            if (readyBlocks.size >= requiredBlocks || block.endOfStream) {
+                            val requiredFrames = requiredResumeWaterlineFrames()
+                            if (readyFrameCount.get() >= requiredFrames || block.endOfStream) {
                                 publishWorkerState(
                                     SourceSeparationPlaybackDataState.Ready,
                                     currentEpoch,
@@ -691,6 +772,29 @@ internal class SourceSeparationStemPlaybackEngine(
         }
     }
 
+    /**
+     * Returns the frame waterline for the current epoch. An opt-in AAC early
+     * threshold applies only while a seek is still filling; normal playback
+     * and recovery retain their existing block waterlines.
+     */
+    private fun requiredResumeWaterlineFrames(): Long {
+        effectiveSeekResumeReadyFrames()?.let { return it }
+        return requiredResumeWaterlineBlocks().toLong() * blockFrames
+    }
+
+    /**
+     * Early release is safe only for a source set that explicitly supports
+     * partial ring reads. A caller cannot accidentally opt a WAV/FLAC source
+     * into the early gate merely by setting a threshold.
+     */
+    private fun effectiveSeekResumeReadyFrames(): Long? {
+        if (seekResumeReadyFrames == null || workerFactories.isEmpty()) return null
+        if (!workerFactories.all(SourceSeparationPlaybackStemSourceFactory::allowPartialSeekRead)) {
+            return null
+        }
+        return seekResumeReadyFrames.toLong()
+    }
+
     private fun markRecovery(underflow: Boolean) {
         val current = activeEpoch.get()
         if (underflow) seekResumeState.set(SeekResumeState.None)
@@ -715,6 +819,8 @@ internal class SourceSeparationStemPlaybackEngine(
         val factories = workerFactories
         val opened = ArrayList<SourceSeparationPlaybackStemSource>(factories.size)
         return try {
+            val parallel = seekResumeState.get() == SeekResumeState.Waiting &&
+                    shouldParallelizeSeek(factories)
             factories.forEachIndexed { index, factory ->
                 val source = factory.open()
                 opened += source
@@ -723,13 +829,21 @@ internal class SourceSeparationStemPlaybackEngine(
                             "${session.stems[index].stemId}."
                 }
             }
-            opened.forEach { source -> source.seekToFrame(frame) }
+            if (parallel) {
+                parallelForEach(
+                    sources = opened,
+                    parallelism = parallelismFor(factories),
+                ) { source -> source.seekToFrame(frame) }
+            } else {
+                opened.forEach { source -> source.seekToFrame(frame) }
+            }
             workerSources = opened
             metrics.setOpenFileDescriptors(
                 factories.sumOf { factory -> factory.openFileDescriptorCount }.toLong(),
             )
             true
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            runCatching { failureSink?.invoke(error) }
             opened.forEach { source -> runCatching { source.close() } }
             workerSources = emptyList()
             metrics.setOpenFileDescriptors(0L)
@@ -761,16 +875,36 @@ internal class SourceSeparationStemPlaybackEngine(
     ): Boolean {
         val factories = workerFactories
         if (workerSources.size == factories.size && workerSources.isNotEmpty()) {
-            val repositioned = runCatching {
+            try {
                 workerSources.forEachIndexed { index, source ->
                     require(source.geometry == session.stems[index].geometry) {
                         "Playback source geometry changed while seeking stem " +
                                 "${session.stems[index].stemId}."
                     }
-                    source.seekToFrame(frame)
                 }
-            }.isSuccess
-            if (repositioned) return true
+                if (seekResumeState.get() == SeekResumeState.Waiting &&
+                    shouldParallelizeSeek(factories)
+                ) {
+                    runCatching {
+                        parallelForEach(
+                            sources = workerSources,
+                            parallelism = parallelismFor(factories),
+                        ) { source -> source.seekToFrame(frame) }
+                    }.getOrElse { error ->
+                        if (closed.get() || error is InterruptedException) throw error
+                        // A vendor codec may reject concurrent flushes. All
+                        // tasks have drained before this fallback, so it is
+                        // safe to re-seek each source serially.
+                        workerSources.forEach { source -> source.seekToFrame(frame) }
+                    }
+                } else {
+                    workerSources.forEach { source -> source.seekToFrame(frame) }
+                }
+                return true
+            } catch (error: Throwable) {
+                if (closed.get() || error is InterruptedException) throw error
+                // Reopen below when the existing source set cannot recover.
+            }
         }
         closeWorkerSources()
         return openWorkerSources(session, frame, "seeking")
@@ -780,6 +914,189 @@ internal class SourceSeparationStemPlaybackEngine(
         workerSources.forEach { source -> runCatching { source.close() } }
         workerSources = emptyList()
         metrics.setOpenFileDescriptors(0L)
+    }
+
+    private fun allowPartialSeekRead(): Boolean {
+        val factories = workerFactories
+        return seekResumeState.get() != SeekResumeState.None &&
+                factories.isNotEmpty() &&
+                factories.all(SourceSeparationPlaybackStemSourceFactory::allowPartialSeekRead)
+    }
+
+    /**
+     * Reads the first block after a seek concurrently for explicitly capable
+     * sources.  Steady-state blocks remain serial so this optimization only
+     * spends extra threads during the resume window.
+     */
+    private fun readStemBlock(
+        factories: List<SourceSeparationPlaybackStemSourceFactory>,
+        sources: List<SourceSeparationPlaybackStemSource>,
+        startFrame: Long,
+        block: StemPcmBlockSet,
+        frameCount: Int,
+        parallelFirstBlock: Boolean,
+    ) {
+        if (parallelFirstBlock && shouldParallelizeSeek(factories)) {
+            try {
+                parallelForEach(
+                    sources = sources,
+                    parallelism = parallelismFor(factories),
+                ) { source, index ->
+                    val read = source.readFrames(
+                        startFrame = startFrame,
+                        destination = block.stemPcm[index],
+                        destinationOffsetBytes = 0,
+                        frameCount = frameCount,
+                    )
+                    require(read == frameCount) {
+                        "Playback stem returned $read of $frameCount frames."
+                    }
+                }
+                return
+            } catch (error: Throwable) {
+                if (closed.get() || error is InterruptedException) throw error
+                // A failed parallel decode may have advanced only some
+                // sources. Re-anchor all of them before the serial retry.
+                sources.forEach { source -> source.seekToFrame(startFrame) }
+                sources.forEachIndexed { index, source ->
+                    val read = source.readFrames(
+                        startFrame = startFrame,
+                        destination = block.stemPcm[index],
+                        destinationOffsetBytes = 0,
+                        frameCount = frameCount,
+                    )
+                    require(read == frameCount) {
+                        "Playback stem returned $read of $frameCount frames."
+                    }
+                }
+            }
+            return
+        }
+        sources.forEachIndexed { index, source ->
+            val read = source.readFrames(
+                startFrame = startFrame,
+                destination = block.stemPcm[index],
+                destinationOffsetBytes = 0,
+                frameCount = frameCount,
+            )
+            require(read == frameCount) {
+                "Playback stem returned $read of $frameCount frames."
+            }
+        }
+    }
+
+    private fun shouldParallelizeSeek(
+        factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    ): Boolean {
+        return factories.size > 1 &&
+                factories.all { factory -> factory.fastSeekParallelism > 1 }
+    }
+
+    private fun parallelismFor(
+        factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    ): Int {
+        return factories.minOf { factory -> factory.fastSeekParallelism }
+            .coerceIn(2, factories.size)
+    }
+
+    private fun prepareFastSeekExecutor(
+        factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    ) {
+        if (!shouldParallelizeSeek(factories)) return
+        ensureFastSeekExecutor(parallelismFor(factories))
+    }
+
+    private fun ensureFastSeekExecutor(size: Int): ExecutorService {
+        synchronized(fastSeekExecutorLock) {
+            val current = fastSeekExecutor
+            if (current != null && !current.isShutdown && fastSeekExecutorSize == size) {
+                return current
+            }
+            // A seek task owns its source until all sibling tasks complete. Do
+            // not tear down a live pool while codec calls are in flight; the
+            // next seek will resize it once the previous batch has drained.
+            if (current != null && fastSeekInFlight.get() > 0) return current
+            current?.shutdown()
+            val threadNumber = AtomicInteger(0)
+            val factory = ThreadFactory { runnable ->
+                Thread(runnable, "BoomingAacSeek-${threadNumber.incrementAndGet()}").apply {
+                    isDaemon = true
+                    priority = (Thread.NORM_PRIORITY - 1).coerceAtLeast(Thread.MIN_PRIORITY)
+                }
+            }
+            return Executors.newFixedThreadPool(size, factory).also {
+                fastSeekExecutor = it
+                fastSeekExecutorSize = size
+            }
+        }
+    }
+
+    private fun parallelForEach(
+        sources: List<SourceSeparationPlaybackStemSource>,
+        parallelism: Int,
+        action: (SourceSeparationPlaybackStemSource, Int) -> Unit,
+    ) {
+        fastSeekInFlight.incrementAndGet()
+        try {
+            val executor = ensureFastSeekExecutor(parallelism)
+            val effectiveParallelism = minOf(
+                parallelism,
+                fastSeekExecutorSize.coerceAtLeast(1),
+            )
+            val permits = Semaphore(effectiveParallelism)
+            val futures = sources.mapIndexed { index, source ->
+                executor.submit<Unit> {
+                    permits.acquire()
+                    try {
+                        action(source, index)
+                    } finally {
+                        permits.release()
+                    }
+                }
+            }
+            awaitFutures(futures)
+        } finally {
+            fastSeekInFlight.decrementAndGet()
+        }
+    }
+
+    private fun parallelForEach(
+        sources: List<SourceSeparationPlaybackStemSource>,
+        parallelism: Int,
+        action: (SourceSeparationPlaybackStemSource) -> Unit,
+    ) {
+        parallelForEach(sources, parallelism) { source, _ -> action(source) }
+    }
+
+    private fun <T> awaitFutures(futures: List<Future<T>>): List<T> {
+        val results = ArrayList<T>(futures.size)
+        var firstFailure: Throwable? = null
+        var interrupted = false
+        futures.forEach { future ->
+            while (true) {
+                try {
+                    results += future.get()
+                    break
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                } catch (error: Throwable) {
+                    val cause = (error as? ExecutionException)?.cause ?: error
+                    if (firstFailure == null) firstFailure = cause
+                    break
+                }
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
+        firstFailure?.let { failure -> throw failure }
+        return results
+    }
+
+    private fun shutdownFastSeekExecutor() {
+        synchronized(fastSeekExecutorLock) {
+            fastSeekExecutor?.shutdownNow()
+            fastSeekExecutor = null
+            fastSeekExecutorSize = 0
+        }
     }
 
     private sealed interface EngineCommand {

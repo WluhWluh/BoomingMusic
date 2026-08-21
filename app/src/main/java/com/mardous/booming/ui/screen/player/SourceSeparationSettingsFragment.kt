@@ -36,6 +36,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -85,6 +88,7 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import com.mardous.booming.separation.SourceSeparationStemIconResolver
 import com.mardous.booming.separation.SourceSeparationStemGainPolicy
+import com.mardous.booming.separation.SourceSeparationCompressionFormat
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.IconifiedSliderTrack
 import com.mardous.booming.ui.component.compose.TitledCard
@@ -208,6 +212,9 @@ private fun SourceSeparationSettingsSheet(
         .collectAsState()
     val autoFlacCompression by viewModel
         .sourceSeparationAutoFlacCompressionFlow
+        .collectAsState()
+    val compressionFormat by viewModel
+        .sourceSeparationCompressionFormatFlow
         .collectAsState()
     val showSnackbarProgress by viewModel
         .sourceSeparationShowSnackbarProgressFlow
@@ -593,13 +600,15 @@ private fun SourceSeparationSettingsSheet(
                             }
 
                             AnimatedVisibility(
-                                visible = currentSongCacheState.canPromoteCompletedStems ||
+                                visible = compressionFormat != SourceSeparationCompressionFormat.None &&
+                                        (currentSongCacheState.canPromoteCompletedStems ||
                                         currentSongFlacPromotionActive
+                                        )
                             ) {
                                 OutlinedButton(
                                     onClick = {
                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
-                                        viewModel.tryFlacCompressionForCurrentSong()
+                                        viewModel.tryCompressionForCurrentSong()
                                     },
                                     enabled = pendingAction == null &&
                                             !currentSongFlacPromotionActive,
@@ -607,18 +616,28 @@ private fun SourceSeparationSettingsSheet(
                                 ) {
                                     Text(
                                         text = when {
-                                            currentSongFlacPromotionRunning ->
-                                                stringResource(
-                                                    R.string.source_separation_flac_compression_working
+                                            currentSongFlacPromotionRunning -> when (compressionFormat) {
+                                                SourceSeparationCompressionFormat.AacLcM4a ->
+                                                    stringResource(R.string.source_separation_aac_compression_working)
+                                                else -> stringResource(
+                                                    R.string.source_separation_flac_compression_working,
                                                 )
+                                            }
                                             currentSongFlacPromotionQueued ->
-                                                stringResource(
-                                                    R.string.source_separation_flac_compression_queued
+                                                when (compressionFormat) {
+                                                    SourceSeparationCompressionFormat.AacLcM4a ->
+                                                        stringResource(R.string.source_separation_aac_compression_queued)
+                                                    else -> stringResource(
+                                                        R.string.source_separation_flac_compression_queued,
+                                                    )
+                                                }
+                                            else -> when (compressionFormat) {
+                                                SourceSeparationCompressionFormat.AacLcM4a ->
+                                                    stringResource(R.string.source_separation_try_aac_compression)
+                                                else -> stringResource(
+                                                    R.string.source_separation_try_flac_compression,
                                                 )
-                                            else ->
-                                                stringResource(
-                                                    R.string.source_separation_try_flac_compression
-                                                )
+                                            }
                                         }
                                     )
                                 }
@@ -660,16 +679,42 @@ private fun SourceSeparationSettingsSheet(
                                 viewModel.setSourceSeparationWindowDecodeEnabled(checked)
                             }
 
-                            LabeledSwitch(
-                                checked = autoFlacCompression,
-                                title = stringResource(
-                                    R.string.source_separation_auto_flac_compression_title
+                            Text(
+                                text = stringResource(
+                                    R.string.source_separation_auto_compression_title,
                                 ),
-                                description = stringResource(
-                                    R.string.source_separation_auto_flac_compression_description
-                                )
-                            ) { checked ->
-                                viewModel.setSourceSeparationAutoFlacCompressionEnabled(checked)
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.source_separation_auto_compression_description,
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                            )
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                listOf(
+                                    SourceSeparationCompressionFormat.None to
+                                            R.string.source_separation_compression_none,
+                                    SourceSeparationCompressionFormat.Flac to
+                                            R.string.source_separation_compression_flac,
+                                    SourceSeparationCompressionFormat.AacLcM4a to
+                                            R.string.source_separation_compression_aac,
+                                ).forEachIndexed { index, (format, label) ->
+                                    SegmentedButton(
+                                        selected = compressionFormat == format,
+                                        onClick = {
+                                            viewModel.setSourceSeparationCompressionFormat(format)
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(
+                                            index = index,
+                                            count = 3,
+                                        ),
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text(stringResource(label), maxLines = 1)
+                                    }
+                                }
                             }
 
                             LabeledSwitch(

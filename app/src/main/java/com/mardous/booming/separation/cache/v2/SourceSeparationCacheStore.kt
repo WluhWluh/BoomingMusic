@@ -191,21 +191,25 @@ class SourceSeparationCacheStore(
                 ) {
                     return SourceSeparationCacheValidationResult.Invalid("promoted-invalid")
                 }
-                val promotedIndexPath = stem.promotedIndexPath
-                    ?: return SourceSeparationCacheValidationResult.Invalid(
-                        "promoted-index-path-missing"
-                    )
-                val promotedIndexIntegrity = stem.promotedIndexIntegrity
-                    ?: return SourceSeparationCacheValidationResult.Invalid(
-                        "promoted-index-integrity-missing"
-                    )
-                if (!validateFile(
-                        file = resolveRelativePath(directory, promotedIndexPath),
-                        expected = promotedIndexIntegrity,
-                        verifyHash = verifyHashes,
-                    )
-                ) {
-                    return SourceSeparationCacheValidationResult.Invalid("promoted-index-invalid")
+                if (stem.resolvedPromotedFormat() == SourceSeparationCacheAudioFormat.Flac) {
+                    val promotedIndexPath = stem.promotedIndexPath
+                        ?: return SourceSeparationCacheValidationResult.Invalid(
+                            "promoted-index-path-missing"
+                        )
+                    val promotedIndexIntegrity = stem.promotedIndexIntegrity
+                        ?: return SourceSeparationCacheValidationResult.Invalid(
+                            "promoted-index-integrity-missing"
+                        )
+                    if (!validateFile(
+                            file = resolveRelativePath(directory, promotedIndexPath),
+                            expected = promotedIndexIntegrity,
+                            verifyHash = verifyHashes,
+                        )
+                    ) {
+                        return SourceSeparationCacheValidationResult.Invalid(
+                            "promoted-index-invalid"
+                        )
+                    }
                 }
             } else {
                 val wavIntegrity = stem.wavIntegrity

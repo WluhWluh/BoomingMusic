@@ -3,6 +3,7 @@ package com.mardous.booming.separation.cache.v2
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
+import com.mardous.booming.separation.audio.Pcm16StereoAacEncodeResult
 import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
@@ -79,6 +80,87 @@ class SourceSeparationCacheFlacPromoterTest {
             completed.cacheKey,
             "completed/stem-00.wav",
         ).exists())
+    }
+
+    @Test
+    fun `aac promotion publishes a complete mutually exclusive set and schedules wav cleanup`() {
+        val fixture = fixture()
+        val completed = fixture.completedManifest()
+        val wavPlayback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
+        val promoter = fixture.promoter(
+            aacEncoder = SourceSeparationCacheAacEncoder { wav, m4a, sampleRate, frameCount, _ ->
+                m4a.writeText("aac:${wav.readText()}")
+                Pcm16StereoAacEncodeResult(
+                    sampleRate = sampleRate,
+                    channelCount = 2,
+                    frameCount = frameCount,
+                    bitRate = 160_000,
+                    encoderDelayFrames = null,
+                    encoderPaddingFrames = null,
+                    timestampOffsetFrames = 0L,
+                    outputBytes = m4a.length(),
+                    codecName = "fake.aac.encoder",
+                    outputMimeType = "audio/mp4a-latm",
+                    outputBitRate = 160_000,
+                    outputProfile = 2,
+                    encodedSampleCount = 1L,
+                    decodedFrameCount = frameCount.toLong(),
+                    firstSampleTimeUs = 0L,
+                    lastSampleTimeUs = 1L,
+                )
+            },
+        )
+
+        val promoted = promoter.promote(
+            cacheKey = completed.cacheKey,
+            format = SourceSeparationCacheAudioFormat.AacLcM4a,
+        ) as SourceSeparationCacheFlacPromotionResult.Completed
+
+        val stems = requireNotNull(promoted.manifest.output).stems
+        assertTrue(stems.all { it.resolvedPromotedFormat() == SourceSeparationCacheAudioFormat.AacLcM4a })
+        assertTrue(stems.all { it.promotedIndexPath == null })
+        assertTrue(stems.all { it.promotedTimestampOffsetFrames == 0L })
+        assertTrue(stems.all { fixture.store.resolveEntryPath(completed.cacheKey, it.wavPath).isFile })
+        val cleanupPaths = requireNotNull(promoted.manifest.cleanup).paths
+        assertTrue(cleanupPaths.containsAll(stems.map(SourceSeparationCacheRenderedStem::wavPath)))
+        assertEquals(
+            SourceSeparationCacheValidationResult.Valid,
+            fixture.store.validateCompletedEntry(promoted.manifest),
+        )
+        fixture.store.recover()
+        assertTrue(fixture.store.resolveEntryPath(completed.cacheKey, stems.first().wavPath).isFile)
+        val aacPlayback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
+        assertEquals("stem-00.m4a", aacPlayback.vocalsFile.name)
+        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
+        wavPlayback.close()
+        assertTrue(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
+        assertFalse(fixture.store.resolveEntryPath(completed.cacheKey, stems.first().wavPath).exists())
+        aacPlayback.close()
+    }
+
+    @Test
+    fun `legacy validated flac path without explicit format remains readable`() {
+        val fixture = fixture()
+        val completed = fixture.completedManifest()
+        // This test exercises the legacy manifest shape only; the fake
+        // promoter avoids requiring a binary PCM WAV fixture.
+        val promoted = fixture.promoter().promote(completed.cacheKey)
+            as SourceSeparationCacheFlacPromotionResult.Completed
+        val legacyOutput = requireNotNull(promoted.manifest.output).copy(
+            stems = requireNotNull(promoted.manifest.output).stems.map { stem ->
+                stem.copy(promotedFormat = null)
+            },
+        )
+        val legacyManifest = promoted.manifest.copy(output = legacyOutput)
+        assertTrue(
+            legacyOutput.stems.all {
+                it.resolvedPromotedFormat() == SourceSeparationCacheAudioFormat.Flac
+            },
+        )
+        assertEquals(
+            SourceSeparationCacheValidationResult.Valid,
+            fixture.store.validateCompletedEntry(legacyManifest),
+        )
     }
 
     @Test
@@ -298,6 +380,28 @@ class SourceSeparationCacheFlacPromoterTest {
     ) {
         fun promoter(
             nowEpochMs: () -> Long = { 10L },
+            aacEncoder: SourceSeparationCacheAacEncoder = SourceSeparationCacheAacEncoder {
+                    _, m4a, _, _, _ ->
+                m4a.writeText("aac")
+                Pcm16StereoAacEncodeResult(
+                    sampleRate = 44_100,
+                    channelCount = 2,
+                    frameCount = TEST_FRAME_COUNT,
+                    bitRate = 160_000,
+                    encoderDelayFrames = null,
+                    encoderPaddingFrames = null,
+                    timestampOffsetFrames = 0L,
+                    outputBytes = m4a.length(),
+                    codecName = "fake.aac.encoder",
+                    outputMimeType = "audio/mp4a-latm",
+                    outputBitRate = 160_000,
+                    outputProfile = 2,
+                    encodedSampleCount = 1L,
+                    decodedFrameCount = TEST_FRAME_COUNT.toLong(),
+                    firstSampleTimeUs = 0L,
+                    lastSampleTimeUs = 1L,
+                )
+            },
             encoder: SourceSeparationCacheFlacEncoder = SourceSeparationCacheFlacEncoder {
                     wav, flac, _, _, _ ->
                 flac.writeText("flac:${wav.readText()}")
@@ -311,6 +415,7 @@ class SourceSeparationCacheFlacPromoterTest {
             repository = repository,
             encoder = encoder,
             nowEpochMs = nowEpochMs,
+            aacEncoder = aacEncoder,
         )
 
         fun realPromoter(

@@ -114,6 +114,13 @@ data class SourceSeparationCacheOutput(
         require(stems.map(SourceSeparationCacheRenderedStem::order) == stems.indices.toList()) {
             "Cache output stem order must be contiguous."
         }
+        val promotedStems = stems.filter(SourceSeparationCacheRenderedStem::promotionValidated)
+        require(promotedStems.isEmpty() || promotedStems.size == stems.size) {
+            "Cache output promotion must cover the complete stem set."
+        }
+        require(promotedStems.map { it.resolvedPromotedFormat() }.distinct().size <= 1) {
+            "Cache output cannot mix promoted audio formats."
+        }
         val artifactPaths = stems.flatMap { stem ->
             listOfNotNull(stem.wavPath, stem.promotedPath, stem.promotedIndexPath)
         }
@@ -126,6 +133,31 @@ data class SourceSeparationCacheOutput(
         require(stems.all { stem ->
             stem.sampleRate == outputSampleRate && stem.frameCount == outputFrameCount
         }) { "Cache output stem audio geometry is inconsistent." }
+        if (promotedStems.isNotEmpty() &&
+            promotedStems.first().resolvedPromotedFormat() == SourceSeparationCacheAudioFormat.AacLcM4a
+        ) {
+            require(promotedStems.map { it.promotedBitRate }.distinct().size == 1) {
+                "AAC promoted stems use different bitrates."
+            }
+            require(promotedStems.map { it.promotedEncoderDelayFrames }.distinct().size == 1) {
+                "AAC promoted stems use different encoder delays."
+            }
+            require(promotedStems.map { it.promotedPaddingFrames }.distinct().size == 1) {
+                "AAC promoted stems use different padding values."
+            }
+            require(promotedStems.map { it.promotedSeekQuantumFrames }.distinct().size == 1) {
+                "AAC promoted stems use different seek quanta."
+            }
+            require(promotedStems.map { it.promotedMaxAnchorOffsetFrames }.distinct().size == 1) {
+                "AAC promoted stems use different anchor offset bounds."
+            }
+            require(promotedStems.map { it.promotedTimestampOffsetFrames }.distinct().size == 1) {
+                "AAC promoted stems use different timestamp offsets."
+            }
+            require(promotedStems.map { it.promotedDecodedFrameCount }.distinct().size == 1) {
+                "AAC promoted stems report different decoded frame counts."
+            }
+        }
         require(windowCount > 0) { "Cache output window count is invalid." }
         require(elapsedMs >= 0L) { "Cache output elapsed time is invalid." }
         require(totalBytes >= 0L) { "Cache output size is invalid." }
@@ -168,6 +200,15 @@ data class SourceSeparationCacheRenderedStem(
     val promotedFormat: SourceSeparationCacheAudioFormat? = null,
     val promotionValidated: Boolean = false,
     val promotedIndexPath: String? = null,
+    val promotedMimeType: String? = null,
+    val promotedBitRate: Int? = null,
+    val promotedEncoderName: String? = null,
+    val promotedEncoderDelayFrames: Long? = null,
+    val promotedPaddingFrames: Long? = null,
+    val promotedSeekQuantumFrames: Int? = null,
+    val promotedMaxAnchorOffsetFrames: Int? = null,
+    val promotedTimestampOffsetFrames: Long? = null,
+    val promotedDecodedFrameCount: Long? = null,
     val channelCount: Int,
     val sampleRate: Int,
     val frameCount: Int,
@@ -179,8 +220,15 @@ data class SourceSeparationCacheRenderedStem(
         StemDescriptor(stemId, semanticId, canonicalLabel, order, production)
         SourceSeparationCacheRelativePath.requireValid(wavPath)
         promotedPath?.let(SourceSeparationCacheRelativePath::requireValid)
-        require((promotedPath == null) == (promotedFormat == null)) {
-            "Cache promoted path and format must be provided together."
+        require(promotedPath != null || promotedFormat == null) {
+            "Cache promoted format has no promoted path."
+        }
+        // Manifests written before the explicit format field was added may
+        // contain a validated .flac path with a null promotedFormat. That
+        // legacy shape is resolved by resolvedPromotedFormat().
+        require(promotedFormat != null || !promotionValidated ||
+                promotedPath?.isNotBlank() == true) {
+            "Validated cache promotion has no promoted path."
         }
         require(!promotionValidated || promotedPath != null) {
             "Validated cache promotion has no promoted output."
@@ -191,8 +239,45 @@ data class SourceSeparationCacheRenderedStem(
         require((promotedIndexPath == null) == (promotedIndexIntegrity == null)) {
             "Cache promoted index path and integrity must be provided together."
         }
-        require(!promotionValidated || promotedIndexPath != null) {
-            "Validated cache promotion has no frame index."
+        val resolvedFormat = resolvedPromotedFormat()
+        require(!promotionValidated || resolvedFormat != null) {
+            "Validated cache promotion has no recognizable format."
+        }
+        require(!promotionValidated || resolvedFormat != SourceSeparationCacheAudioFormat.Wav) {
+            "WAV cannot be marked as a promoted compression format."
+        }
+        require(!promotionValidated || resolvedFormat != SourceSeparationCacheAudioFormat.Flac ||
+                promotedIndexPath != null
+        ) {
+            "Validated FLAC promotion has no frame index."
+        }
+        if (promotionValidated && resolvedFormat == SourceSeparationCacheAudioFormat.AacLcM4a) {
+            require(promotedIndexPath == null) { "AAC promotion must not use a FLAC frame index." }
+            promotedMimeType?.let {
+                require(it == "audio/mp4a-latm") { "AAC promotion has an invalid MIME type." }
+            }
+            promotedBitRate?.let { require(it > 0) { "AAC promotion bitrate is invalid." } }
+            promotedEncoderName?.let {
+                require(it.isNotBlank()) { "AAC promotion encoder identity is invalid." }
+            }
+            promotedEncoderDelayFrames?.let {
+                require(it >= 0L) { "AAC promotion encoder delay is invalid." }
+            }
+            promotedPaddingFrames?.let {
+                require(it >= 0L) { "AAC promotion padding is invalid." }
+            }
+            require((promotedSeekQuantumFrames ?: 0) > 0) {
+                "AAC promotion seek quantum is invalid."
+            }
+            promotedMaxAnchorOffsetFrames?.let {
+                require(it > 0) { "AAC promotion anchor offset bound is invalid." }
+            }
+            promotedTimestampOffsetFrames?.let {
+                require(it >= 0L) { "AAC promotion timestamp offset is invalid." }
+            }
+            promotedDecodedFrameCount?.let {
+                require(it > 0L) { "AAC promotion decoded frame count is invalid." }
+            }
         }
         require(channelCount > 0) { "Cache stem channel count is invalid." }
         require(sampleRate > 0) { "Cache stem sample rate is invalid." }
@@ -208,12 +293,24 @@ data class SourceSeparationCacheRenderedStem(
     )
 
     fun playbackPath(): String = promotedPath.takeIf { promotionValidated } ?: wavPath
+
+    fun resolvedPromotedFormat(): SourceSeparationCacheAudioFormat? {
+        if (!promotionValidated && promotedFormat == null) return null
+        return promotedFormat ?: when {
+            promotedPath?.endsWith(".flac", ignoreCase = true) == true ->
+                SourceSeparationCacheAudioFormat.Flac
+            promotedPath?.endsWith(".m4a", ignoreCase = true) == true ->
+                SourceSeparationCacheAudioFormat.AacLcM4a
+            else -> null
+        }
+    }
 }
 
 @Serializable
 enum class SourceSeparationCacheAudioFormat {
     Wav,
     Flac,
+    AacLcM4a,
 }
 
 @Serializable

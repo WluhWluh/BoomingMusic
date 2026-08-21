@@ -461,6 +461,8 @@ private fun SourceSeparationModelAwareCacheFormat.displayText(): String = when (
         stringResource(R.string.source_separation_cache_format_wav)
     SourceSeparationModelAwareCacheFormat.Flac ->
         stringResource(R.string.source_separation_cache_format_flac)
+    SourceSeparationModelAwareCacheFormat.AacLcM4a ->
+        stringResource(R.string.source_separation_cache_format_aac_m4a)
     SourceSeparationModelAwareCacheFormat.Unknown ->
         stringResource(R.string.source_separation_cache_format_unknown)
 }

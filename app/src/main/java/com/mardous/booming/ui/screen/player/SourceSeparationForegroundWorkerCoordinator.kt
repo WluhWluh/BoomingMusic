@@ -21,6 +21,7 @@ import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.SourceSeparationPerformanceScope
+import com.mardous.booming.separation.SourceSeparationCompressionFormat
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
@@ -58,6 +59,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.separation.sourceSeparationCompressionFormat
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_ENABLED
@@ -1066,10 +1068,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 dispatchRecoveredTerminal(SourceSeparationRecoveredTerminal.Completed(
                     song = callbackSong,
                     cacheKey = session.cacheKey,
-                    shouldPromoteCompletedStems = preferences.getBoolean(
-                        SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
-                        true,
-                    ),
+                    shouldPromoteCompletedStems = preferences
+                        .sourceSeparationCompressionFormat() !=
+                            SourceSeparationCompressionFormat.None,
                 ))
                 true
             }
@@ -1355,10 +1356,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     SourceSeparationRecoveredTerminal.Completed(
                         song = callbackSong,
                         cacheKey = session.cacheKey,
-                        shouldPromoteCompletedStems = preferences.getBoolean(
-                            SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
-                            true,
-                        ),
+                        shouldPromoteCompletedStems = preferences
+                            .sourceSeparationCompressionFormat() !=
+                                SourceSeparationCompressionFormat.None,
                     )
                 )
                 true
@@ -1756,10 +1756,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     activeWorkerSong = resolved
                 }
             }
-            val shouldPromoteCompletedStems = preferences.getBoolean(
-                SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
-                true,
-            )
+            val shouldPromoteCompletedStems = preferences
+                .sourceSeparationCompressionFormat() != SourceSeparationCompressionFormat.None
             val completedCache = completedCacheStatus(resolved)
             if (completedCache != null) {
                 if (!isCurrentRequest(request, resolved.cacheKey)) {

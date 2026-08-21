@@ -1,0 +1,598 @@
+{
+  "runId": "aac-fast-s10-r19-input-seed4",
+  "mode": "playback-service",
+  "modelId": "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0",
+  "status": "complete",
+  "deviceModel": "SM-G9730",
+  "sdk": 31,
+  "abi": "arm64-v8a",
+  "compressionFormat": "aac_lc_160k",
+  "extraSeekCount": 10,
+  "repositorySong": {
+    "requestedId": 633917,
+    "resolvedId": 633917,
+    "resolvedUri": "content:\/\/media\/external_primary\/audio\/media\/633917",
+    "resolvedTitle": "aac-fast-s10-r19-input-seed4"
+  },
+  "promotionElapsedMs": 28282,
+  "promotedFormat": "AacLcM4a",
+  "promotedPaths": [
+    "completed\/stem-00.m4a",
+    "completed\/stem-01.m4a",
+    "completed\/stem-02.m4a",
+    "completed\/stem-03.m4a",
+    "completed\/stem-04.m4a",
+    "completed\/stem-05.m4a"
+  ],
+  "wavFallbackRetained": true,
+  "cacheBytesAfterPromotion": 98922412,
+  "enableResult": {
+    "code": 0,
+    "enabled": true,
+    "processing": false
+  },
+  "playbackResolution": {
+    "cacheKey": "a6e13357fdf2cd1abe60d7ec837d924419bb51ba6eb63bc8317a81ed60fe01a8",
+    "modelId": "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0",
+    "status": "Ready",
+    "manifestState": "Completed",
+    "validationWithoutHashes": "Valid",
+    "entry": {
+      "modelAvailability": "InstalledExact",
+      "state": "Completed",
+      "stemCount": 6
+    },
+    "openCompleted": true
+  },
+  "syncResult": {
+    "code": 0
+  },
+  "cacheKey": "a6e13357fdf2cd1abe60d7ec837d924419bb51ba6eb63bc8317a81ed60fe01a8",
+  "artifactSha256": "8b19e919dd17c6a93d862ca9b1158ed72f09feb4c52745819346369506ba4ed7",
+  "stemIds": [
+    "drums",
+    "bass",
+    "other",
+    "vocals",
+    "guitar",
+    "piano"
+  ],
+  "activeStemCount": 6,
+  "seekRequests": 12,
+  "underrunsBeforeSeek": 0,
+  "underruns": 0,
+  "seekUnderruns": 0,
+  "allowedSeekUnderruns": 0,
+  "initialSeekToDataPlaneReadyMs": 395,
+  "initialSeekToFirstMixedPcmMs": 141,
+  "initialSeekToMixedPcmMs": 141,
+  "extraSeekToDataPlaneReadyLatency": {
+    "sampleCount": 10,
+    "meanMs": 339.1,
+    "p50Ms": 324,
+    "p95Ms": 545,
+    "maxMs": 545,
+    "samplesMs": [
+      269,
+      280,
+      291,
+      317,
+      324,
+      333,
+      336,
+      340,
+      356,
+      545
+    ]
+  },
+  "extraSeekToFirstMixedPcmLatency": {
+    "sampleCount": 10,
+    "meanMs": 114,
+    "p50Ms": 104,
+    "p95Ms": 159,
+    "maxMs": 159,
+    "samplesMs": [
+      77,
+      87,
+      96,
+      103,
+      104,
+      113,
+      115,
+      141,
+      145,
+      159
+    ]
+  },
+  "extraSeekLatency": {
+    "sampleCount": 10,
+    "meanMs": 339.1,
+    "p50Ms": 324,
+    "p95Ms": 545,
+    "maxMs": 545,
+    "samplesMs": [
+      269,
+      280,
+      291,
+      317,
+      324,
+      333,
+      336,
+      340,
+      356,
+      545
+    ]
+  },
+  "seekSummaries": [
+    {
+      "seekIndex": 0,
+      "targetPositionMs": 10000,
+      "dataPlaneReadyMs": 395,
+      "firstMixedPcmMs": 141,
+      "mixedOutputGeneration": 8,
+      "anchorCount": 6,
+      "requestedFrames": [
+        441000,
+        441000,
+        441000,
+        441000,
+        441000,
+        441000
+      ],
+      "anchorFrames": [
+        440319,
+        440319,
+        440319,
+        440319,
+        440319,
+        440319
+      ],
+      "anchorOffsetsFrames": [
+        -681,
+        -681,
+        -681,
+        -681,
+        -681,
+        -681
+      ],
+      "anchorOffsetMinFrames": -681,
+      "anchorOffsetMaxFrames": -681,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 1,
+      "targetPositionMs": 2337,
+      "dataPlaneReadyMs": 280,
+      "firstMixedPcmMs": 104,
+      "mixedOutputGeneration": 11,
+      "anchorCount": 6,
+      "requestedFrames": [
+        103062,
+        103062,
+        103062,
+        103062,
+        103062,
+        103062
+      ],
+      "anchorFrames": [
+        102399,
+        102399,
+        102399,
+        102399,
+        102399,
+        102399
+      ],
+      "anchorOffsetsFrames": [
+        -663,
+        -663,
+        -663,
+        -663,
+        -663,
+        -663
+      ],
+      "anchorOffsetMinFrames": -663,
+      "anchorOffsetMaxFrames": -663,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 2,
+      "targetPositionMs": 10256,
+      "dataPlaneReadyMs": 340,
+      "firstMixedPcmMs": 159,
+      "mixedOutputGeneration": 14,
+      "anchorCount": 6,
+      "requestedFrames": [
+        452290,
+        452290,
+        452290,
+        452290,
+        452290,
+        452290
+      ],
+      "anchorFrames": [
+        451584,
+        451584,
+        451584,
+        451584,
+        451584,
+        451584
+      ],
+      "anchorOffsetsFrames": [
+        -706,
+        -706,
+        -706,
+        -706,
+        -706,
+        -706
+      ],
+      "anchorOffsetMinFrames": -706,
+      "anchorOffsetMaxFrames": -706,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 3,
+      "targetPositionMs": 18175,
+      "dataPlaneReadyMs": 336,
+      "firstMixedPcmMs": 141,
+      "mixedOutputGeneration": 17,
+      "anchorCount": 6,
+      "requestedFrames": [
+        801518,
+        801518,
+        801518,
+        801518,
+        801518,
+        801518
+      ],
+      "anchorFrames": [
+        800767,
+        800767,
+        800767,
+        800767,
+        800767,
+        800767
+      ],
+      "anchorOffsetsFrames": [
+        -751,
+        -751,
+        -751,
+        -751,
+        -751,
+        -751
+      ],
+      "anchorOffsetMinFrames": -751,
+      "anchorOffsetMaxFrames": -751,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 4,
+      "targetPositionMs": 26094,
+      "dataPlaneReadyMs": 317,
+      "firstMixedPcmMs": 87,
+      "mixedOutputGeneration": 18,
+      "anchorCount": 6,
+      "requestedFrames": [
+        1150745,
+        1150745,
+        1150745,
+        1150745,
+        1150745,
+        1150745
+      ],
+      "anchorFrames": [
+        1149951,
+        1149951,
+        1149951,
+        1149951,
+        1149951,
+        1149951
+      ],
+      "anchorOffsetsFrames": [
+        -794,
+        -794,
+        -794,
+        -794,
+        -794,
+        -794
+      ],
+      "anchorOffsetMinFrames": -794,
+      "anchorOffsetMaxFrames": -794,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 5,
+      "targetPositionMs": 6013,
+      "dataPlaneReadyMs": 356,
+      "firstMixedPcmMs": 103,
+      "mixedOutputGeneration": 21,
+      "anchorCount": 6,
+      "requestedFrames": [
+        265173,
+        265173,
+        265173,
+        265173,
+        265173,
+        265173
+      ],
+      "anchorFrames": [
+        264191,
+        264191,
+        264191,
+        264191,
+        264191,
+        264191
+      ],
+      "anchorOffsetsFrames": [
+        -982,
+        -982,
+        -982,
+        -982,
+        -982,
+        -982
+      ],
+      "anchorOffsetMinFrames": -982,
+      "anchorOffsetMaxFrames": -982,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 6,
+      "targetPositionMs": 13932,
+      "dataPlaneReadyMs": 324,
+      "firstMixedPcmMs": 96,
+      "mixedOutputGeneration": 24,
+      "anchorCount": 6,
+      "requestedFrames": [
+        614401,
+        614401,
+        614401,
+        614401,
+        614401,
+        614401
+      ],
+      "anchorFrames": [
+        614399,
+        614399,
+        614399,
+        614399,
+        614399,
+        614399
+      ],
+      "anchorOffsetsFrames": [
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2
+      ],
+      "anchorOffsetMinFrames": -2,
+      "anchorOffsetMaxFrames": -2,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 7,
+      "targetPositionMs": 21851,
+      "dataPlaneReadyMs": 545,
+      "firstMixedPcmMs": 113,
+      "mixedOutputGeneration": 27,
+      "anchorCount": 6,
+      "requestedFrames": [
+        963629,
+        963629,
+        963629,
+        963629,
+        963629,
+        963629
+      ],
+      "anchorFrames": [
+        963583,
+        963583,
+        963583,
+        963583,
+        963583,
+        963583
+      ],
+      "anchorOffsetsFrames": [
+        -46,
+        -46,
+        -46,
+        -46,
+        -46,
+        -46
+      ],
+      "anchorOffsetMinFrames": -46,
+      "anchorOffsetMaxFrames": -46,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 8,
+      "targetPositionMs": 1770,
+      "dataPlaneReadyMs": 333,
+      "firstMixedPcmMs": 145,
+      "mixedOutputGeneration": 32,
+      "anchorCount": 6,
+      "requestedFrames": [
+        78057,
+        78057,
+        78057,
+        78057,
+        78057,
+        78057
+      ],
+      "anchorFrames": [
+        77823,
+        77823,
+        77823,
+        77823,
+        77823,
+        77823
+      ],
+      "anchorOffsetsFrames": [
+        -234,
+        -234,
+        -234,
+        -234,
+        -234,
+        -234
+      ],
+      "anchorOffsetMinFrames": -234,
+      "anchorOffsetMaxFrames": -234,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 9,
+      "targetPositionMs": 9689,
+      "dataPlaneReadyMs": 291,
+      "firstMixedPcmMs": 115,
+      "mixedOutputGeneration": 35,
+      "anchorCount": 6,
+      "requestedFrames": [
+        427285,
+        427285,
+        427285,
+        427285,
+        427285,
+        427285
+      ],
+      "anchorFrames": [
+        427007,
+        427007,
+        427007,
+        427007,
+        427007,
+        427007
+      ],
+      "anchorOffsetsFrames": [
+        -278,
+        -278,
+        -278,
+        -278,
+        -278,
+        -278
+      ],
+      "anchorOffsetMinFrames": -278,
+      "anchorOffsetMaxFrames": -278,
+      "anchorOffsetSpreadFrames": 0
+    },
+    {
+      "seekIndex": 10,
+      "targetPositionMs": 17608,
+      "dataPlaneReadyMs": 269,
+      "firstMixedPcmMs": 77,
+      "mixedOutputGeneration": 36,
+      "anchorCount": 6,
+      "requestedFrames": [
+        776513,
+        776513,
+        776513,
+        776513,
+        776513,
+        776513
+      ],
+      "anchorFrames": [
+        776191,
+        776191,
+        776191,
+        776191,
+        776191,
+        776191
+      ],
+      "anchorOffsetsFrames": [
+        -322,
+        -322,
+        -322,
+        -322,
+        -322,
+        -322
+      ],
+      "anchorOffsetMinFrames": -322,
+      "anchorOffsetMaxFrames": -322,
+      "anchorOffsetSpreadFrames": 0
+    }
+  ],
+  "baselinePssKb": 135579,
+  "peakPssKb": 149578,
+  "pssDeltaKb": 13999,
+  "openFileDescriptors": 6,
+  "bufferPoolBytes": 1179648,
+  "thermalStatuses": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "aacOpenTraceCount": 12,
+  "wavFallbackTraceCount": 0,
+  "sourceTraceExcerpt": [
+    "mix.setBlend | session=0 blend=0.7 gains=0.6, 1.0",
+    "mix.onConfigure | session=0 active=false encoding=2 rate=44100 channels=2",
+    "mix.aac | durationFrames=1321986 contractFrames=1323000 deltaFrames=-1014",
+    "mix.aac | durationFrames=1321986 contractFrames=1323000 deltaFrames=-1014",
+    "mix.aac | durationFrames=1321986 contractFrames=1323000 deltaFrames=-1014",
+    "mix.aac | durationFrames=1321986 contractFrames=1323000 deltaFrames=-1014",
+    "mix.aac | durationFrames=1321986 contractFrames=1323000 deltaFrames=-1014",
+    "mix.aac | durationFrames=1321986 contractFrames=1323000 deltaFrames=-1014",
+    "mix.disable | session=0 active=false",
+    "mix.setBlend | session=0 blend=0.5 endpoints=none",
+    "mix.enable | session=1 mode=OriginalSource positionMs=0 blend=0.5 stemRate=44100 stemChannels=2 mixedPrerollMs=0 blockFrames=4096 seekResumeBlockFrames=1024 seekResumeReadyFrames=none stems=stem-00.m4a, stem-01.m4a, stem-02.m4a, stem-03.m4a, stem-04.m4a, stem-05.m4a",
+    "mix.outputFlush.arm | session=1 barrier=1 generation=2",
+    "mix.seekTo | session=1 positionMs=10",
+    "mix.outputFlush.confirmed | session=1 barrier=1 generation=4",
+    "mix.outputFlush.cancel | session=1 barrier=1 generation=4",
+    "mix.aac | open codec=c2.android.aac.decoder file=stem-00.m4a",
+    "mix.aac | open codec=c2.android.aac.decoder file=stem-01.m4a",
+    "mix.fastResumeWait | session=1 frames=0 requested=4410",
+    "mix.queueInput | session=1 seq=1 branch=engine-underflow active=true mode=OriginalSource inputEncoding=2 inputRate=44100 stemRate=44100 inputChannels=2 remaining=17640 vocalsBytes=0 instrumentalBytes=0",
+    "mix.aac | open codec=c2.android.aac.decoder file=stem-02.m4a",
+    "mix.fastResumeWait | session=1 frames=0 requested=4410",
+    "mix.queueInput | session=1 seq=2 branch=engine-underflow active=true mode=OriginalSource inputEncoding=2 inputRate=44100 stemRate=44100 inputChannels=2 remaining=17640 vocalsBytes=0 instrumentalBytes=0",
+    "mix.aac | open codec=c2.android.aac.decoder file=stem-03.m4a",
+    "mix.fastResumeWait | session=1 frames=0 requested=4410",
+    "mix.queueInput | session=1 seq=3 branch=engine-underflow active=true mode=OriginalSource inputEncoding=2 inputRate=44100 stemRate=44100 inputChannels=2 remaining=17640 vocalsBytes=0 instrumentalBytes=0",
+    "mix.aac | open codec=c2.android.aac.decoder file=stem-04.m4a",
+    "mix.aac | open codec=c2.android.aac.decoder file=stem-05.m4a",
+    "mix.aac | seek requestedFrame=0 anchorFrame=0 offsetFrames=0 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=3208 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=0 anchorFrame=0 offsetFrames=0 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=3196 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=0 anchorFrame=0 offsetFrames=0 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=2992 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=0 anchorFrame=0 offsetFrames=0 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=2882 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=0 anchorFrame=0 offsetFrames=0 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=2544 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.fastResumeWait | session=1 frames=0 requested=4410",
+    "mix.aac | seek requestedFrame=0 anchorFrame=0 offsetFrames=0 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=2477 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.queueInput | session=1 seq=4 branch=engine-underflow active=true mode=OriginalSource inputEncoding=2 inputRate=44100 stemRate=44100 inputChannels=2 remaining=17640 vocalsBytes=0 instrumentalBytes=0",
+    "mix.aac | seek requestedFrame=441 anchorFrame=0 offsetFrames=-441 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=2595 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=441 anchorFrame=0 offsetFrames=-441 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=4245 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=441 anchorFrame=0 offsetFrames=-441 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=4133 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=441 anchorFrame=0 offsetFrames=-441 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=4453 codecFlushUs=0 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=441 anchorFrame=0 offsetFrames=-441 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=7576 codecFlushUs=1 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | seek requestedFrame=441 anchorFrame=0 offsetFrames=-441 seekMode=previous requestedSeekMode=previous seekQuantumFrames=1024 extractorSeekUs=10063 codecFlushUs=1 flushed=false delayFrames=unknown paddingFrames=unknown timestampOffsetFrames=0",
+    "mix.aac | firstInputPtsUs=0 seekToFirstInputUs=18410",
+    "mix.aac | firstInputPtsUs=0 seekToFirstInputUs=18231",
+    "mix.aac | firstInputPtsUs=0 seekToFirstInputUs=26005",
+    "mix.aac | firstInputPtsUs=0 seekToFirstInputUs=25512",
+    "mix.aac | firstInputPtsUs=0 seekToFirstInputUs=30152",
+    "mix.aac | firstOutputPtsUs=0 requestedFrame=441 queuedInputs=5 seekToFirstOutputMs=28",
+    "mix.aac | firstInputPtsUs=0 seekToFirstInputUs=17751",
+    "mix.aac | firstOutputPtsUs=0 requestedFrame=441 queuedInputs=5 seekToFirstOutputMs=34",
+    "mix.aac | firstOutputPtsUs=0 requestedFrame=441 queuedInputs=5 seekToFirstOutputMs=37",
+    "mix.aac | firstOutputPtsUs=0 requestedFrame=441 queuedInputs=5 seekToFirstOutputMs=46",
+    "mix.aac | firstOutputPtsUs=0 requestedFrame=441 queuedInputs=5 seekToFirstOutputMs=49",
+    "mix.aac | firstOutputPtsUs=0 requestedFrame=441 queuedInputs=5 seekToFirstOutputMs=51",
+    "mix.fastResumeWait | session=1 frames=1024 requested=4410",
+    "mix.mixedOutputPreroll.start | session=1 generation=5 sampleRate=44100 ms=0 frames=0",
+    "mix.mixedOutputPreroll.ready | session=1 generation=5",
+    "mix.queueInput | session=1 seq=5 branch=mixed-engine-partial active=true mode=OriginalSource inputEncoding=2 inputRate=44100 stemRate=44100 inputChannels=2 remaining=17640 vocalsBytes=4096 instrumentalBytes=4096",
+    "mix.queueInput | session=1 seq=6 branch=mixed-engine-partial active=true mode=OriginalSource inputEncoding=2 inputRate=44100 stemRate=44100 inputChannels=2 remaining=13544 vocalsBytes=8192 instrumentalBytes=8192",
+    "mix.fastResumeWait | session=1 frames=1024 requested=1338",
+    "mix.queueInput | session=1 seq=7 branch=mixed-engine-partial active=true mode=OriginalSource inputEncoding=2 inputRate=44100 stemRate=44100 inputChannels=2 remaining=5352 vocalsBytes=4096 instrumentalBytes=4096"
+  ],
+  "serviceRecreated": true,
+  "transportMediaId": 633917,
+  "transportUri": "content:\/\/media\/external_primary\/audio\/media\/633917"
+}

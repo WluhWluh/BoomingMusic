@@ -83,8 +83,10 @@ Read settings with `settings.get`. `settings.set` accepts any subset of:
 ```text
 mix_mode:s:off|global|per_song
 auto_start:b, gpu_enabled:b, window_decode:b, auto_flac:b
+compression_format:s:none|flac|aac_lc_160k
 snackbar_progress:b, snackbar_messages:b
-preroll_ms:l, ready_windows:i
+preroll_ms:l, aac_seek_ready_frames:i, aac_seek_block_frames:i, aac_seek_mode:s:previous|closest|next
+ready_windows:i
 auto_cleanup:b, partial_limit:i, completed_limit:i
 npu_enabled:b:false
 ```
